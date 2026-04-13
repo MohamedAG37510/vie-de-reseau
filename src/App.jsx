@@ -45,7 +45,7 @@ export default function App(){
   const [localCodes,setLocalCodes]=useState({});
   const [iwItems,setIwItems]=useState([]);
   const [showIWPanel,setShowIWPanel]=useState(null); // pm code or null
-  const [iwForm,setIwForm]=useState({ref_iw:"",position:"",commentaire:""});
+  const [iwForm,setIwForm]=useState({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});
   const [iwEditId,setIwEditId]=useState(null);
   const [lightbox,setLightbox]=useState(null);
   const fileRef=useRef(null);
@@ -155,16 +155,16 @@ export default function App(){
   const addIW=async(pmCode)=>{
     if(!iwForm.ref_iw.trim())return;
     const id=`iw_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
-    const row={id,pm_code:pmCode,ref_iw:iwForm.ref_iw.trim(),position:iwForm.position.trim(),commentaire:iwForm.commentaire.trim()};
+    const row={id,pm_code:pmCode,ref_iw:iwForm.ref_iw.trim(),cote_oc:iwForm.cote_oc.trim(),cote_oi:iwForm.cote_oi.trim(),commentaire:iwForm.commentaire.trim()};
     await supabase.from("iw_items").insert(row);
     setIwItems(prev=>[...prev,{...row,created_at:new Date().toISOString()}]);
-    setIwForm({ref_iw:"",position:"",commentaire:""});
+    setIwForm({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});
   };
 
   const updateIW=async(id)=>{
-    await supabase.from("iw_items").update({ref_iw:iwForm.ref_iw.trim(),position:iwForm.position.trim(),commentaire:iwForm.commentaire.trim()}).eq("id",id);
-    setIwItems(prev=>prev.map(iw=>iw.id===id?{...iw,ref_iw:iwForm.ref_iw.trim(),position:iwForm.position.trim(),commentaire:iwForm.commentaire.trim()}:iw));
-    setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);
+    await supabase.from("iw_items").update({ref_iw:iwForm.ref_iw.trim(),cote_oc:iwForm.cote_oc.trim(),cote_oi:iwForm.cote_oi.trim(),commentaire:iwForm.commentaire.trim()}).eq("id",id);
+    setIwItems(prev=>prev.map(iw=>iw.id===id?{...iw,ref_iw:iwForm.ref_iw.trim(),cote_oc:iwForm.cote_oc.trim(),cote_oi:iwForm.cote_oi.trim(),commentaire:iwForm.commentaire.trim()}:iw));
+    setIwForm({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});setIwEditId(null);
   };
 
   const deleteIW=async(id)=>{
@@ -172,8 +172,8 @@ export default function App(){
     setIwItems(prev=>prev.filter(iw=>iw.id!==id));
   };
 
-  const startEditIW=(iw)=>{setIwEditId(iw.id);setIwForm({ref_iw:iw.ref_iw,position:iw.position||"",commentaire:iw.commentaire||""});};
-  const cancelEditIW=()=>{setIwEditId(null);setIwForm({ref_iw:"",position:"",commentaire:""});};
+  const startEditIW=(iw)=>{setIwEditId(iw.id);setIwForm({ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire:iw.commentaire||""});};
+  const cancelEditIW=()=>{setIwEditId(null);setIwForm({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});};
 
   // ========== DELETE PMS ==========
   const resetPms=async()=>{
@@ -313,7 +313,7 @@ export default function App(){
 
   const startCR=pm=>{
     const pmIws=iwForPM(pm.code);
-    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,position:iw.position||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:""}));
+    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:""}));
     setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
   };
   const submitCR=async()=>{const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");};
@@ -358,7 +358,7 @@ export default function App(){
     const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"}):"";const etat=typeof r.etat==="string"?r.etat:"";
     const photosHtml=(r.photos||[]).map(p=>`<div style="break-inside:avoid;text-align:center;margin-bottom:10px;"><img src="${p.data}" style="max-width:100%;max-height:250px;object-fit:contain;border-radius:6px;border:1px solid #ddd;"/>${p.label?`<div style="font-size:10px;color:#666;margin-top:3px;">${p.label}</div>`:""}</div>`).join("");
     const iwRes=r.iw_results||r.iwResults||[];
-    const iwHtml=iwRes.length>0?`<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:6px;">📋 Checklist IW (${iwRes.filter(i=>i.status==="Fait").length}/${iwRes.length})</div>${iwRes.map(iw=>{const c=iw.status==="Fait"?"#dcfce7":iw.status==="Impossible"?"#f3e8ff":iw.status==="Pas fait"?"#fee2e2":"#f9f9f7";const bc=iw.status==="Fait"?"#059669":iw.status==="Impossible"?"#7c3aed":iw.status==="Pas fait"?"#dc2626":"#999";return`<div style="padding:6px 8px;margin-bottom:3px;border-radius:4px;background:${c};border-left:3px solid ${bc};font-size:11px;"><strong style="font-family:monospace;">${iw.ref_iw}</strong>${iw.position?` · 📍 ${iw.position}`:""} — <span style="font-weight:700;color:${bc};">${iw.status||"—"}</span>${iw.commentaire_tech?`<br/><span style="color:#1e40af;font-size:9px;">💬 Tech: ${iw.commentaire_tech}</span>`:""}</div>`;}).join("")}</div>`:"";
+    const iwHtml=iwRes.length>0?`<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:6px;">📋 Checklist IW (${iwRes.filter(i=>i.status==="Fait").length}/${iwRes.length})</div>${iwRes.map(iw=>{const c=iw.status==="Fait"?"#dcfce7":iw.status==="Impossible"?"#f3e8ff":iw.status==="Pas fait"?"#fee2e2":"#f9f9f7";const bc=iw.status==="Fait"?"#059669":iw.status==="Impossible"?"#7c3aed":iw.status==="Pas fait"?"#dc2626":"#999";return`<div style="padding:6px 8px;margin-bottom:3px;border-radius:4px;background:${c};border-left:3px solid ${bc};font-size:11px;"><strong style="font-family:monospace;">${iw.ref_iw}</strong>${iw.cote_oc||iw.cote_oi?` · ${iw.cote_oc?`OC:${iw.cote_oc}`:""} ${iw.cote_oi?`OI:${iw.cote_oi}`:""}`:""}  — <span style="font-weight:700;color:${bc};">${iw.status||"—"}</span>${iw.commentaire_tech?`<br/><span style="color:#1e40af;font-size:9px;">💬 Tech: ${iw.commentaire_tech}</span>`:""}</div>`;}).join("")}</div>`:"";
     const html=`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>CR-${r.id} ${pmCode}</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'DM Sans',sans-serif;padding:30px;color:#1a1a2e;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #e63946;padding-bottom:12px;margin-bottom:20px;}.logo{display:flex;align-items:center;gap:10px;}.logo-circle{width:40px;height:40px;border-radius:50%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;}.title{font-size:16px;font-weight:800;}.subtitle{font-size:9px;color:#888;}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#fafaf6;border-radius:8px;padding:14px;margin-bottom:16px;}.full{grid-column:1/-1;}.label{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:9px;font-weight:700;text-transform:uppercase;}.badge-blue{background:#dbeafe;color:#1e40af;}.badge-red{background:#fee2e2;color:#b91c1c;}.badge-green{background:#dcfce7;color:#166534;}.badge-orange{background:#ffedd5;color:#c2410c;}.section{margin-bottom:14px;}.section-title{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:6px;}.content-box{background:#fafaf6;padding:10px;border-radius:6px;white-space:pre-wrap;font-size:11px;border-left:3px solid #e63946;}.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}.footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;font-size:9px;color:#999;text-align:center;}@media print{body{padding:20px;}@page{size:A4;margin:15mm;}}</style></head><body>
     <div class="header"><div class="logo"><div class="logo-circle">TS</div><div><div class="title">Compte Rendu</div><div class="subtitle">CR-${r.id}</div></div></div><div style="text-align:right;"><div style="font-weight:700;">${dateStr}</div>${r.h1?`<div style="color:#888;">${r.h1} → ${r.h2||"?"}</div>`:""}</div></div>
     <div class="info-grid"><div><div class="label">PM</div><div style="font-family:monospace;font-weight:800;">${pmCode}</div></div><div><div class="label">Technicien</div><div style="font-weight:700;">${r.tech||"?"}</div></div><div class="full"><div class="label">Adresse</div><div style="font-size:11px;">${pmAdresse}</div></div></div>
@@ -502,16 +502,17 @@ export default function App(){
         {iwForPM(showIWPanel).map(iw=>(
           <div key={iw.id} style={{padding:10,marginBottom:6,borderRadius:8,border:`1px solid ${CL.bd}`,background:iwEditId===iw.id?"#fffbeb":"#fafaf6"}}>
             {iwEditId===iw.id?<>
+              <div style={{marginBottom:6}}><label style={lbl}>Réf IW (jeton) *</label><input value={iwForm.ref_iw} onChange={e=>setIwForm(f=>({...f,ref_iw:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                <div><label style={lbl}>Réf IW *</label><input value={iwForm.ref_iw} onChange={e=>setIwForm(f=>({...f,ref_iw:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
-                <div><label style={lbl}>Position</label><input value={iwForm.position} onChange={e=>setIwForm(f=>({...f,position:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+                <div><label style={lbl}>Côté OC</label><input value={iwForm.cote_oc} onChange={e=>setIwForm(f=>({...f,cote_oc:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+                <div><label style={lbl}>Côté OI</label><input value={iwForm.cote_oi} onChange={e=>setIwForm(f=>({...f,cote_oi:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
               </div>
               <div style={{marginBottom:6}}><label style={lbl}>Commentaire</label><input value={iwForm.commentaire} onChange={e=>setIwForm(f=>({...f,commentaire:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
               <div style={{display:"flex",gap:4}}><button onClick={()=>updateIW(iw.id)} style={{...b1,padding:"4px 10px",fontSize:10}}>✓ Sauver</button><button onClick={cancelEditIW} style={{...b2,padding:"4px 10px",fontSize:10}}>Annuler</button></div>
             </>:<div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div>
                 <div style={{fontFamily:"monospace",fontSize:12,fontWeight:800,color:CL.dk}}>{iw.ref_iw}</div>
-                {iw.position&&<div style={{fontFamily:F,fontSize:9,color:CL.sb}}>📍 {iw.position}</div>}
+                {(iw.cote_oc||iw.cote_oi)&&<div style={{fontFamily:F,fontSize:9,color:CL.sb}}>{iw.cote_oc&&`OC: ${iw.cote_oc}`}{iw.cote_oc&&iw.cote_oi&&" · "}{iw.cote_oi&&`OI: ${iw.cote_oi}`}</div>}
                 {iw.commentaire&&<div style={{fontFamily:F,fontSize:9,color:"#92400e",marginTop:2}}>💬 {iw.commentaire}</div>}
               </div>
               <div style={{display:"flex",gap:3}}>
@@ -524,9 +525,10 @@ export default function App(){
         {iwForPM(showIWPanel).length===0&&<div style={{textAlign:"center",padding:16,color:CL.sb,fontFamily:F,fontSize:12}}>Aucune IW référencée.</div>}
         {!iwEditId&&<div style={{marginTop:10,padding:12,borderRadius:8,border:`2px dashed ${CL.a}`,background:"#fef2f2"}}>
           <div style={{fontFamily:F,fontSize:11,fontWeight:700,color:CL.a,marginBottom:8}}>+ Ajouter une IW</div>
+          <div style={{marginBottom:6}}><label style={lbl}>Réf IW (jeton) *</label><input value={iwForm.ref_iw} onChange={e=>setIwForm(f=>({...f,ref_iw:e.target.value}))} placeholder="Ex: IW-2024-0142" style={{...inp,fontSize:11,padding:"5px 8px"}} onKeyDown={e=>{if(e.key==="Enter")addIW(showIWPanel);}}/></div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-            <div><label style={lbl}>Réf IW *</label><input value={iwForm.ref_iw} onChange={e=>setIwForm(f=>({...f,ref_iw:e.target.value}))} placeholder="Ex: IW-2024-0142" style={{...inp,fontSize:11,padding:"5px 8px"}} onKeyDown={e=>{if(e.key==="Enter")addIW(showIWPanel);}}/></div>
-            <div><label style={lbl}>Position</label><input value={iwForm.position} onChange={e=>setIwForm(f=>({...f,position:e.target.value}))} placeholder="Ex: P3-C2" style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+            <div><label style={lbl}>Côté OC</label><input value={iwForm.cote_oc} onChange={e=>setIwForm(f=>({...f,cote_oc:e.target.value}))} placeholder="Ex: P3-C2" style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+            <div><label style={lbl}>Côté OI</label><input value={iwForm.cote_oi} onChange={e=>setIwForm(f=>({...f,cote_oi:e.target.value}))} placeholder="Ex: P1-C4" style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
           </div>
           <div style={{marginBottom:6}}><label style={lbl}>Commentaire</label><input value={iwForm.commentaire} onChange={e=>setIwForm(f=>({...f,commentaire:e.target.value}))} placeholder="Note pour le tech..." style={{...inp,fontSize:11,padding:"5px 8px"}} onKeyDown={e=>{if(e.key==="Enter")addIW(showIWPanel);}}/></div>
           <button onClick={()=>addIW(showIWPanel)} disabled={!iwForm.ref_iw.trim()} style={{...b1,padding:"6px 14px",fontSize:11,opacity:iwForm.ref_iw.trim()?1:.4}}>+ Ajouter</button>
@@ -574,7 +576,7 @@ export default function App(){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
               <div>
                 <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{iw.ref_iw}</div>
-                {iw.position&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>📍 Position : {iw.position}</div>}
+                {(iw.cote_oc||iw.cote_oi)&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{iw.cote_oc&&`OC: ${iw.cote_oc}`}{iw.cote_oc&&iw.cote_oi&&" · "}{iw.cote_oi&&`OI: ${iw.cote_oi}`}</div>}
               </div>
               <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"À traiter"}</B>
             </div>
@@ -636,7 +638,7 @@ export default function App(){
           const stC={Fait:"#059669","Pas fait":"#dc2626",Impossible:"#7c3aed"};
           return(<div key={iw.id||iw.ref_iw} style={{padding:8,marginBottom:4,borderRadius:6,border:`1px solid ${stC[iw.status]||CL.bd}`,background:iw.status==="Fait"?"#f0fdf4":iw.status==="Impossible"?"#faf5ff":iw.status==="Pas fait"?"#fef2f2":"#f9f9f7"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><span style={{fontFamily:"monospace",fontSize:11,fontWeight:800}}>{iw.ref_iw}</span>{iw.position&&<span style={{fontFamily:F,fontSize:9,color:CL.sb,marginLeft:6}}>📍 {iw.position}</span>}</div>
+              <div><span style={{fontFamily:"monospace",fontSize:11,fontWeight:800}}>{iw.ref_iw}</span>{(iw.cote_oc||iw.cote_oi)&&<span style={{fontFamily:F,fontSize:9,color:CL.sb,marginLeft:6}}>{iw.cote_oc&&`OC:${iw.cote_oc}`}{iw.cote_oc&&iw.cote_oi&&" · "}{iw.cote_oi&&`OI:${iw.cote_oi}`}</span>}</div>
               <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"—"}</B>
             </div>
             {iw.commentaire_mgr&&<div style={{fontFamily:F,fontSize:9,color:"#92400e",marginTop:3}}>💬 Mgr: {iw.commentaire_mgr}</div>}
