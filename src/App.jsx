@@ -43,10 +43,9 @@ export default function App(){
   const [newMgrCode,setNewMgrCode]=useState("");
   const [histSearch,setHistSearch]=useState("");
   const [localCodes,setLocalCodes]=useState({});
-  const [lightbox,setLightbox]=useState(null); // {photos:[], index:0}
+  const [resolvedSearch,setResolvedSearch]=useState("");
   const fileRef=useRef(null);
   const impRef=useRef(null);
-  const reportRef=useRef(null);
 
   // ========== SUPABASE DATA LOADING ==========
   const loadAll = useCallback(async()=>{
@@ -58,7 +57,7 @@ export default function App(){
         supabase.from("assignments").select("*"),
         supabase.from("config").select("*"),
       ]);
-      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng})));
+      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
       if(assData){const a={};assData.forEach(x=>a[x.pm_code]=x.tech_name);setAssigns(a);}
@@ -210,11 +209,24 @@ export default function App(){
         if(i%5===4)await new Promise(r=>setTimeout(r,150));
       }
 
-      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng}));
+      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng,resolved:false,resolved_at:null}));
       const{error}=await supabase.from("pms").upsert(rows,{onConflict:"code"});
       if(error){setImpMsg("Erreur: "+error.message);setGeoProgress("");return;}
+
+      // Mark PMs absent from new import as resolved
+      const importedCodes=new Set(np.map(p=>p.code));
+      const activePmsBefore=pms.filter(p=>!p.resolved);
+      const toResolve=activePmsBefore.filter(p=>!importedCodes.has(p.code));
+      let resolvedCount=0;
+      if(toResolve.length>0){
+        const now=new Date().toISOString();
+        const resCodes=toResolve.map(p=>p.code);
+        await supabase.from("pms").update({resolved:true,resolved_at:now}).in("code",resCodes);
+        resolvedCount=toResolve.length;
+      }
+
       const geocoded=geoResults.filter(p=>p.lat).length;
-      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés`);
+      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés${resolvedCount>0?` · ${resolvedCount} PM résolus`:""}`);
       setGeoProgress("");
       await loadAll();
     };
@@ -252,7 +264,7 @@ export default function App(){
   const [routeData,setRouteData]=useState([]);
 
   const calcRoute=(techName)=>{
-    const techPms=pms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
+    const techPms=activePms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
     const optimized=optimizeRoute(techPms);
     let totalDist=0;
     const data=optimized.map((p,i)=>{
@@ -264,8 +276,10 @@ export default function App(){
     setRouteData(data);setShowRoute(true);
   };
 
-  const depts=[...new Set(pms.map(p=>p.dept).filter(Boolean))].sort();
-  const myPms=isT?pms.filter(pm=>assigns[pm.code]===tName):pms;
+  const activePms=pms.filter(p=>!p.resolved);
+  const resolvedPms=pms.filter(p=>p.resolved);
+  const depts=[...new Set(activePms.map(p=>p.dept).filter(Boolean))].sort();
+  const myPms=isT?activePms.filter(pm=>assigns[pm.code]===tName):activePms;
   const filtered=myPms.filter(pm=>{
     const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
     const md=fDept==="all"||pm.dept===fDept;
@@ -277,136 +291,6 @@ export default function App(){
 
   const startCR=pm=>{setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:""});setPg("form");};
   const submitCR=async()=>{const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");};
-
-  // ========== LIGHTBOX ==========
-  const openLightbox=(photos,index=0)=>setLightbox({photos,index});
-  const closeLightbox=()=>setLightbox(null);
-  const lbPrev=()=>setLightbox(lb=>({...lb,index:(lb.index-1+lb.photos.length)%lb.photos.length}));
-  const lbNext=()=>setLightbox(lb=>({...lb,index:(lb.index+1)%lb.photos.length}));
-  const lbDownload=()=>{
-    if(!lightbox)return;
-    const p=lightbox.photos[lightbox.index];
-    const a=document.createElement("a");
-    a.href=p.data;
-    a.download=p.label||p.name||`photo_${lightbox.index+1}.jpg`;
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-  };
-  const lbDownloadAll=()=>{
-    if(!lightbox)return;
-    lightbox.photos.forEach((p,i)=>{
-      setTimeout(()=>{
-        const a=document.createElement("a");
-        a.href=p.data;
-        a.download=p.label||p.name||`photo_${i+1}.jpg`;
-        document.body.appendChild(a);a.click();document.body.removeChild(a);
-      },i*300);
-    });
-  };
-
-  useEffect(()=>{
-    if(!lightbox)return;
-    const h=e=>{
-      if(e.key==="Escape")closeLightbox();
-      if(e.key==="ArrowLeft")lbPrev();
-      if(e.key==="ArrowRight")lbNext();
-    };
-    window.addEventListener("keydown",h);
-    return()=>window.removeEventListener("keydown",h);
-  },[lightbox]);
-
-  const Lightbox=()=>{
-    if(!lightbox)return null;
-    const p=lightbox.photos[lightbox.index];
-    const multi=lightbox.photos.length>1;
-    return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.92)",zIndex:9999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",backdropFilter:"blur(8px)"}} onClick={closeLightbox}>
-      <div style={{position:"absolute",top:12,right:12,display:"flex",gap:8,zIndex:10001}}>
-        <button onClick={e=>{e.stopPropagation();lbDownload();}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#fff",fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",backdropFilter:"blur(4px)",transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.15)"}>⬇ Télécharger</button>
-        {multi&&<button onClick={e=>{e.stopPropagation();lbDownloadAll();}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#fff",fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",backdropFilter:"blur(4px)",transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.15)"}>⬇ Tout ({lightbox.photos.length})</button>}
-        <button onClick={e=>{e.stopPropagation();closeLightbox();}} style={{width:38,height:38,borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)",transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.15)"}>✕</button>
-      </div>
-      {multi&&<button onClick={e=>{e.stopPropagation();lbPrev();}} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",border:"none",background:"rgba(255,255,255,.12)",color:"#fff",fontSize:22,cursor:"pointer",zIndex:10001,transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.12)"}>‹</button>}
-      {multi&&<button onClick={e=>{e.stopPropagation();lbNext();}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",border:"none",background:"rgba(255,255,255,.12)",color:"#fff",fontSize:22,cursor:"pointer",zIndex:10001,transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.12)"}>›</button>}
-      <div onClick={e=>e.stopPropagation()} style={{maxWidth:"90vw",maxHeight:"80vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <img src={p.data} style={{maxWidth:"90vw",maxHeight:"80vh",objectFit:"contain",borderRadius:8,boxShadow:"0 8px 40px rgba(0,0,0,.6)"}} alt={p.label||""}/>
-      </div>
-      <div style={{marginTop:12,textAlign:"center",zIndex:10001}}>
-        {p.label&&<div style={{color:"#fff",fontFamily:F,fontSize:13,fontWeight:600,marginBottom:4}}>{p.label}</div>}
-        {multi&&<div style={{color:"rgba(255,255,255,.5)",fontFamily:F,fontSize:12}}>{lightbox.index+1} / {lightbox.photos.length}</div>}
-      </div>
-    </div>);
-  };
-
-  // ========== EXPORT PDF ==========
-  const exportPDF=(r)=>{
-    const pmCode=r.pmCode||r.pm_code||"";
-    const pmAdresse=r.pmAdresse||r.pm_adresse||"";
-    const suiviTxt=r.suiviTxt||r.suivi_txt||"";
-    const nbCli=r.nbCli||r.nb_cli||0;
-    const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"}):"";
-    const etat=typeof r.etat==="string"?r.etat:"";
-
-    const photosHtml=(r.photos||[]).map((p,i)=>`
-      <div style="break-inside:avoid;text-align:center;margin-bottom:10px;">
-        <img src="${p.data}" style="max-width:100%;max-height:250px;object-fit:contain;border-radius:6px;border:1px solid #ddd;"/>
-        ${p.label?`<div style="font-size:10px;color:#666;margin-top:3px;">${p.label}</div>`:""}
-      </div>`).join("");
-
-    const html=`<!DOCTYPE html><html><head><meta charset="utf-8"/>
-    <title>CR-${r.id} ${pmCode}</title>
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
-      *{margin:0;padding:0;box-sizing:border-box;}
-      body{font-family:'DM Sans',sans-serif;padding:30px;color:#1a1a2e;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-      .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #e63946;padding-bottom:12px;margin-bottom:20px;}
-      .logo{display:flex;align-items:center;gap:10px;}
-      .logo-circle{width:40px;height:40px;border-radius:50%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;}
-      .title{font-size:16px;font-weight:800;}
-      .subtitle{font-size:9px;color:#888;text-transform:uppercase;}
-      .meta{text-align:right;font-size:11px;}
-      .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#fafaf6;border-radius:8px;padding:14px;margin-bottom:16px;}
-      .info-grid .full{grid-column:1/-1;}
-      .label{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}
-      .value{font-size:12px;font-weight:700;}
-      .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;}
-      .badge-blue{background:#dbeafe;color:#1e40af;}
-      .badge-red{background:#fee2e2;color:#b91c1c;}
-      .badge-green{background:#dcfce7;color:#166534;}
-      .badge-orange{background:#ffedd5;color:#c2410c;}
-      .section{margin-bottom:14px;}
-      .section-title{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
-      .content-box{background:#fafaf6;padding:10px;border-radius:6px;white-space:pre-wrap;font-size:11px;border-left:3px solid #e63946;}
-      .suivi{background:#fef3c7;border:1.5px solid #f59e0b;border-radius:6px;padding:10px;margin-bottom:14px;}
-      .suivi-title{font-size:10px;font-weight:800;color:#92400e;}
-      .suivi-text{font-size:11px;color:#78350f;}
-      .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}
-      .footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;font-size:9px;color:#999;text-align:center;}
-      @media print{body{padding:20px;}@page{size:A4;margin:15mm;}}
-    </style></head><body>
-    <div class="header">
-      <div class="logo"><div class="logo-circle">TS</div><div><div class="title">Compte Rendu</div><div class="subtitle">CR-${r.id}</div></div></div>
-      <div class="meta"><div style="font-weight:700;">${dateStr}</div>${r.h1?`<div style="color:#888;">${r.h1} → ${r.h2||"?"}</div>`:""}</div>
-    </div>
-    <div class="info-grid">
-      <div><div class="label">PM</div><div class="value" style="font-family:monospace;">${pmCode}</div></div>
-      <div><div class="label">Technicien</div><div class="value">${r.tech||"?"}</div></div>
-      <div class="full"><div class="label">Adresse</div><div style="font-size:11px;">${pmAdresse}</div></div>
-    </div>
-    <div class="section"><div class="section-title">Type d'intervention</div><div>${(r.types||[]).map(t=>`<span class="badge badge-blue">${t}</span> `).join("")}</div></div>
-    <div class="section"><div class="section-title">État</div><span class="badge ${etat.includes("Bon")?"badge-green":etat.includes("Critique")?"badge-red":"badge-orange"}">${etat||"N/A"}</span></div>
-    ${(r.probs||[]).length>0?`<div class="section"><div class="section-title">Problèmes identifiés</div><div>${r.probs.map(p=>`<span class="badge badge-red">${p}</span> `).join("")}</div></div>`:""}
-    ${r.actions?`<div class="section"><div class="section-title">Actions réalisées</div><div class="content-box">${r.actions}</div></div>`:""}
-    ${nbCli>0?`<div class="section"><div class="section-title">Clients rétablis</div><span class="badge badge-green">${nbCli}</span></div>`:""}
-    ${r.mesures?`<div class="section"><div class="section-title">Mesures optiques</div><div style="font-family:monospace;font-size:10px;background:#f1f5f9;padding:8px;border-radius:4px;white-space:pre-wrap;">${r.mesures}</div></div>`:""}
-    ${r.materiel?`<div class="section"><div class="section-title">Matériel utilisé</div><div style="font-size:11px;white-space:pre-wrap;">${r.materiel}</div></div>`:""}
-    ${r.obs?`<div class="section"><div class="section-title">Observations</div><div style="font-size:11px;font-style:italic;white-space:pre-wrap;">${r.obs}</div></div>`:""}
-    ${r.suivi?`<div class="suivi"><div class="suivi-title">⚠️ SUIVI NÉCESSAIRE</div><div class="suivi-text">${suiviTxt}</div></div>`:""}
-    ${(r.photos||[]).length>0?`<div class="section"><div class="section-title">📸 Photos (${r.photos.length})</div><div class="photos">${photosHtml}</div></div>`:""}
-    <div class="footer">VIE DE RÉSEAU — TechnoSmart · Généré le ${new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"})}</div>
-    </body></html>`;
-
-    const w=window.open("","_blank","width=800,height=900");
-    if(w){w.document.write(html);w.document.close();setTimeout(()=>{w.print();},600);}
-  };
 
   // ========== STYLES ==========
   const inp={width:"100%",padding:"9px 12px",borderRadius:6,border:`1.5px solid ${CL.bd}`,fontFamily:F,fontSize:14,outline:"none",background:"#fff",boxSizing:"border-box"};
@@ -459,6 +343,7 @@ export default function App(){
         <button onClick={()=>{setPg("hist");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="hist"?CL.a:"rgba(255,255,255,.06)",color:pg==="hist"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 CR</button>
         <button onClick={()=>{setPg("route");setShowRoute(false);}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="route"?CL.a:"rgba(255,255,255,.06)",color:pg==="route"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Tournée</button>
         {isM&&<button onClick={()=>{setPg("team");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="team"?CL.a:"rgba(255,255,255,.06)",color:pg==="team"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>👷 Équipe</button>}
+        {isM&&<button onClick={()=>{setPg("resolved");setResolvedSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="resolved"?CL.a:"rgba(255,255,255,.06)",color:pg==="resolved"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>✅ Résolus{resolvedPms.length>0?` (${resolvedPms.length})`:""}</button>}
         <button onClick={()=>setUser(null)} style={{padding:"5px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",background:"transparent",color:"#fca5a5",fontFamily:F,fontSize:9,fontWeight:700,cursor:"pointer",marginLeft:4}}>⏏</button>
       </div>
     </div>
@@ -474,22 +359,22 @@ export default function App(){
       {geoProgress&&<div style={{marginTop:8,padding:8,borderRadius:6,background:"#dbeafe",fontFamily:F,fontSize:12,fontWeight:600,color:"#1e40af"}}>{geoProgress}</div>}
     </div>
     <div style={crd}>
-      <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{pms.length}</strong> PM · <strong>{depts.length}</strong> depts</div>
+      <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{activePms.length}</strong> PM actifs · <strong>{resolvedPms.length}</strong> résolus · <strong>{depts.length}</strong> depts</div>
       {pms.length>0&&<button onClick={resetPms} style={{...b2,marginTop:10,fontSize:11,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Réinitialiser</button>}
     </div>
   </div>);
 
   // ========== DASHBOARD ==========
   const Dash=()=>{
-    const aff=Object.keys(assigns).length;
-    const stats=isM?[{l:"PM",v:pms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:pms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"CR",v:reps.length,i:"📝",c:"#059669"},{l:"Affectés",v:aff,i:"✅",c:"#7c3aed"},{l:"Non aff.",v:pms.length-aff,i:"⚠️",c:pms.length-aff>0?"#dc2626":"#059669"}]
+    const aff=Object.keys(assigns).filter(c=>activePms.some(p=>p.code===c)).length;
+    const stats=isM?[{l:"PM actifs",v:activePms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:activePms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"CR",v:reps.length,i:"📝",c:"#059669"},{l:"Affectés",v:aff,i:"✅",c:"#7c3aed"},{l:"Non aff.",v:activePms.length-aff,i:"⚠️",c:activePms.length-aff>0?"#dc2626":"#059669"},{l:"Résolus",v:resolvedPms.length,i:"✅",c:"#059669"}]
     :[{l:"Mes PM",v:myPms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:myPms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"Mes CR",v:myReps.length,i:"📝",c:"#059669"}];
     return(<div style={{padding:16}}>
       {myPms.length===0?(
         <div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>{isM?"📥":"📭"}</div><h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginTop:12}}>{isM?"Aucun PM":"Aucun PM affecté"}</h2><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>{isM?"Importez votre fichier.":"Contactez votre manager."}</p>{isM&&<button onClick={()=>setPg("import")} style={{...b1,marginTop:16}}>📥 Importer</button>}</div>
       ):(<>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,5)},1fr)`,gap:8,marginBottom:16}}>
-        {stats.map((s,i)=>(<div key={i} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,6)},1fr)`,gap:8,marginBottom:16}}>
+        {stats.map((s,i)=>(<div key={i} onClick={s.l==="Résolus"?()=>setPg("resolved"):undefined} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0,cursor:s.l==="Résolus"?"pointer":"default"}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <input placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:260,fontSize:13}}/>
@@ -562,7 +447,7 @@ export default function App(){
       <div style={crd}><h3 style={sT}>📸 Photos</h3>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhotos} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current?.click()} style={{...b1,background:"#fff",color:CL.a,border:`2px dashed ${CL.a}`,width:"100%",padding:14,marginBottom:10,fontSize:12}}>📷 Prendre / ajouter photos</button>
-        {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} onClick={()=>openLightbox(form.photos,i)} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} title="Cliquer pour agrandir"/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
+        {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginBottom:30}}>
         <button onClick={()=>setPg("dash")} style={b2}>Annuler</button>
@@ -582,8 +467,8 @@ export default function App(){
     const pmAdresse=r.pmAdresse||r.pm_adresse||"";
     const suiviTxt=r.suiviTxt||r.suivi_txt||"";
     const nbCli=r.nbCli||r.nb_cli||0;
-    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><div style={{display:"flex",gap:8,marginBottom:12}}><button onClick={()=>setViewR(null)} style={{...b2,fontSize:11}}>← Retour</button><button onClick={()=>exportPDF(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button></div>
-    <div ref={reportRef} style={{...crd,border:`2px solid ${CL.a}`}}>
+    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><button onClick={()=>setViewR(null)} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
+    <div style={{...crd,border:`2px solid ${CL.a}`}}>
       <div style={{display:"flex",justifyContent:"space-between",borderBottom:`2px solid ${CL.a}`,paddingBottom:10,marginBottom:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}><Logo/><div><div style={{fontFamily:F,fontWeight:800,fontSize:15}}>Compte Rendu</div><div style={{fontFamily:F,fontSize:9,color:CL.sb}}>CR-{r.id}</div></div></div>
         <div style={{textAlign:"right"}}><div style={{fontFamily:F,fontSize:12,fontWeight:700}}>{dateStr}</div>{r.h1&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{r.h1}→{r.h2||"?"}</div>}</div>
@@ -604,7 +489,7 @@ export default function App(){
       {r.materiel&&<div style={{marginBottom:10}}><div style={lbl}>Matériel</div><div style={{fontFamily:F,fontSize:11,whiteSpace:"pre-wrap"}}>{r.materiel}</div></div>}
       {r.obs&&<div style={{marginBottom:10}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:11,fontStyle:"italic",whiteSpace:"pre-wrap"}}>{r.obs}</div></div>}
       {r.suivi&&<div style={{background:"#fef3c7",border:"1.5px solid #f59e0b",borderRadius:6,padding:8,marginBottom:10}}><div style={{fontFamily:F,fontSize:10,fontWeight:800,color:"#92400e"}}>⚠️ SUIVI</div><div style={{fontFamily:F,fontSize:11,color:"#78350f"}}>{suiviTxt}</div></div>}
-      {r.photos?.length>0&&<div><div style={{...lbl,marginBottom:6}}>📸 Photos ({r.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{r.photos.map((p,i)=><div key={i} onClick={()=>openLightbox(r.photos,i)} style={{borderRadius:4,overflow:"hidden",border:`1px solid ${CL.bd}`,cursor:"pointer",transition:"transform .15s,box-shadow .15s"}} onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.03)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,.15)";}} onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="none";}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/>{p.label&&<div style={{padding:2,fontFamily:F,fontSize:9,color:CL.sb,textAlign:"center"}}>{p.label}</div>}</div>)}</div></div>}
+      {r.photos?.length>0&&<div><div style={{...lbl,marginBottom:6}}>📸 Photos ({r.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{r.photos.map((p,i)=><div key={i} style={{borderRadius:4,overflow:"hidden",border:`1px solid ${CL.bd}`}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/>{p.label&&<div style={{padding:2,fontFamily:F,fontSize:9,color:CL.sb,textAlign:"center"}}>{p.label}</div>}</div>)}</div></div>}
     </div></div>);
   };
 
@@ -664,6 +549,66 @@ export default function App(){
   </div>);
   };
 
+  // ========== RESOLVED PMs (Manager only) ==========
+  const reactivatePM=async(code)=>{
+    await supabase.from("pms").update({resolved:false,resolved_at:null}).eq("code",code);
+    await loadAll();
+  };
+
+  const ResolvedPg=()=>{
+    const fl=resolvedPms.filter(p=>{
+      if(!resolvedSearch)return true;
+      const s=resolvedSearch.toLowerCase();
+      return p.code.toLowerCase().includes(s)||p.adresse.toLowerCase().includes(s)||(assigns[p.code]||"").toLowerCase().includes(s);
+    });
+    const resDepts=[...new Set(resolvedPms.map(p=>p.dept).filter(Boolean))].sort();
+
+    if(viewR)return VR({r:viewR});
+
+    return(<div style={{padding:16}}>
+      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:4}}>✅ PM Résolus</h2>
+      <p style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:14}}>PM absents du dernier import — considérés comme traités.</p>
+
+      {resolvedPms.length===0?
+        <div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>🎉</div><h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginTop:12}}>Aucun PM résolu</h3><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>Les PM absents du prochain import apparaîtront ici.</p></div>
+      :<>
+        <input placeholder="🔍 Rechercher code, adresse, tech..." value={resolvedSearch} onChange={e=>setResolvedSearch(e.target.value)} style={{...inp,maxWidth:400,marginBottom:14,fontSize:13}}/>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #059669",marginBottom:0}}><span style={{fontSize:20}}>✅</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resolvedPms.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Résolus</div></div></div>
+          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #2563eb",marginBottom:0}}><span style={{fontSize:20}}>📝</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resolvedPms.reduce((s,p)=>reps.filter(r=>(r.pmCode||r.pm_code)===p.code).length+s,0)}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>CR associés</div></div></div>
+          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #7c3aed",marginBottom:0}}><span style={{fontSize:20}}>🏢</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resDepts.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Depts</div></div></div>
+        </div>
+
+        <div style={{...crd,padding:0,overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",background:"#059669",color:"#fff",fontFamily:F,fontSize:9,fontWeight:700,padding:"7px 10px",textTransform:"uppercase"}}>
+            <div>Code</div><div>Dpt</div><div>Adresse</div><div style={{textAlign:"center"}}>CR</div><div style={{textAlign:"center"}}>Résolu le</div><div style={{textAlign:"center"}}>Actions</div>
+          </div>
+          <div style={{maxHeight:450,overflowY:"auto"}}>
+            {fl.map((pm,i)=>{
+              const pmReps=reps.filter(r=>(r.pmCode||r.pm_code)===pm.code);
+              const resDate=pm.resolved_at?new Date(pm.resolved_at).toLocaleDateString("fr-FR"):"—";
+              return(<div key={pm.code} style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",padding:"8px 10px",fontFamily:F,fontSize:11,background:i%2===0?"#fff":"#f0fdf4",borderBottom:`1px solid ${CL.bd}`,alignItems:"center"}}>
+                <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}</div>
+                <div style={{color:CL.sb,fontSize:10}}>{pm.dept}</div>
+                <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
+                <div style={{textAlign:"center"}}>
+                  {pmReps.length>0?<button onClick={()=>{setPg("hist");setHistSearch(pm.code);}} style={{...b2,padding:"2px 7px",fontSize:9,color:"#059669",borderColor:"#86efac"}}>📋 {pmReps.length}</button>
+                  :<span style={{fontFamily:F,fontSize:10,color:CL.sb}}>—</span>}
+                </div>
+                <div style={{textAlign:"center",fontFamily:F,fontSize:9,color:CL.sb}}>{resDate}</div>
+                <div style={{textAlign:"center"}}>
+                  <button onClick={()=>reactivatePM(pm.code)} style={{...b2,padding:"3px 8px",fontSize:9,color:"#2563eb",borderColor:"#93c5fd"}} title="Réactiver ce PM">🔄 Réactiver</button>
+                </div>
+              </div>);
+            })}
+          </div>
+        </div>
+        {fl.length===0&&resolvedSearch&&<div style={{textAlign:"center",padding:30,color:CL.sb,fontFamily:F}}>Aucun PM résolu correspondant.</div>}
+      </>}
+    </div>);
+  };
+
   // ========== ROUTE / TOURNÉE ==========
   const RoutePg=()=>{
     const techsWithPms=isM?[...new Set(Object.values(assigns))]:[];
@@ -677,7 +622,7 @@ export default function App(){
       {isM&&<div style={{...crd}}>
         <h3 style={sT}>Calculer une tournée</h3>
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {techsWithPms.map(t=>{const n=pms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
+          {techsWithPms.map(t=>{const n=activePms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
             <button key={t} onClick={()=>calcRoute(t)} style={{...b1,padding:"8px 14px",fontSize:12}}>{t} ({n} PM)</button>
           );})}
         </div>
@@ -722,7 +667,6 @@ export default function App(){
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="route"&&RoutePg()}
-    {Lightbox()}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="route"&&RoutePg()}
   </div>);
 }
