@@ -56,7 +56,7 @@ export default function App(){
         supabase.from("assignments").select("*"),
         supabase.from("config").select("*"),
       ]);
-      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw})));
+      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
       if(assData){const a={};assData.forEach(x=>a[x.pm_code]=x.tech_name);setAssigns(a);}
@@ -158,7 +158,28 @@ export default function App(){
     setLoginErr("Code invalide");
   };
 
+  // ========== GEOCODING ==========
+  const geocodeAddress=async(adresse)=>{
+    try{
+      const resp=await fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(adresse)}&limit=1`);
+      const data=await resp.json();
+      if(data.features?.length>0){const[lng,lat]=data.features[0].geometry.coordinates;return{lat,lng};}
+    }catch(e){console.error("Geocode error:",e);}
+    return{lat:null,lng:null};
+  };
+
+  const geocodeBatch=async(items)=>{
+    const results=[];
+    for(let i=0;i<items.length;i++){
+      const{lat,lng}=await geocodeAddress(items[i].adresse);
+      results.push({...items[i],lat,lng});
+      if(i%5===4)await new Promise(r=>setTimeout(r,200));// rate limit
+    }
+    return results;
+  };
+
   // ========== IMPORT ==========
+  const [geoProgress,setGeoProgress]=useState("");
   const handleImport=e=>{
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
@@ -176,10 +197,23 @@ export default function App(){
       const np=[];
       for(let i=1;i<lines.length;i++){const v=lines[i].split(sep).map(x=>x.trim().replace(/^["']|["']$/g,""));if(v[iC])np.push({code:v[iC],dept:iD>=0?v[iD]||"":"",adresse:iA>=0?v[iA]||"":"",nbIW:iN>=0?parseInt(v[iN])||0:0});}
       if(!np.length){setImpMsg("Aucun PM valide");return;}
-      const rows=np.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW}));
+
+      // Geocode addresses
+      setGeoProgress("Géocodage en cours... 0/"+np.length);
+      const geoResults=[];
+      for(let i=0;i<np.length;i++){
+        const{lat,lng}=await geocodeAddress(np[i].adresse);
+        geoResults.push({...np[i],lat,lng});
+        setGeoProgress(`Géocodage... ${i+1}/${np.length}`);
+        if(i%5===4)await new Promise(r=>setTimeout(r,150));
+      }
+
+      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng}));
       const{error}=await supabase.from("pms").upsert(rows,{onConflict:"code"});
-      if(error){setImpMsg("Erreur: "+error.message);return;}
-      setImpMsg(`${np.length} PM importés/mis à jour`);
+      if(error){setImpMsg("Erreur: "+error.message);setGeoProgress("");return;}
+      const geocoded=geoResults.filter(p=>p.lat).length;
+      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés`);
+      setGeoProgress("");
       await loadAll();
     };
     reader.readAsText(file);e.target.value="";
@@ -187,6 +221,46 @@ export default function App(){
 
   const handlePhotos=e=>{Array.from(e.target.files).forEach(f=>{const rd=new FileReader();rd.onload=ev=>setForm(fm=>({...fm,photos:[...(fm.photos||[]),{name:f.name,data:ev.target.result,label:""}]}));rd.readAsDataURL(f);});e.target.value="";};
   const toggleArr=(field,val)=>setForm(f=>({...f,[field]:f[field].includes(val)?f[field].filter(v=>v!==val):[...f[field],val]}));
+
+  // ========== NAVIGATION & ROUTE ==========
+  const openWaze=(lat,lng)=>{window.open(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,"_blank");};
+  const openMaps=(lat,lng,label)=>{window.open(`https://maps.google.com/maps?q=${lat},${lng}&label=${encodeURIComponent(label||"")}`,"_blank");};
+  const openMapsAddr=(addr)=>{window.open(`https://maps.google.com/maps?q=${encodeURIComponent(addr)}`,"_blank");};
+
+  const haversine=(lat1,lng1,lat2,lng2)=>{
+    const R=6371;const dLat=(lat2-lat1)*Math.PI/180;const dLng=(lng2-lng1)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  };
+
+  const optimizeRoute=(pmList)=>{
+    const geo=pmList.filter(p=>p.lat&&p.lng);
+    if(geo.length<2)return geo;
+    const visited=[geo[0]];const remaining=[...geo.slice(1)];
+    while(remaining.length>0){
+      const last=visited[visited.length-1];
+      let nearest=0,minDist=Infinity;
+      remaining.forEach((p,i)=>{const d=haversine(last.lat,last.lng,p.lat,p.lng);if(d<minDist){minDist=d;nearest=i;}});
+      visited.push(remaining.splice(nearest,1)[0]);
+    }
+    return visited;
+  };
+
+  const [showRoute,setShowRoute]=useState(false);
+  const [routeData,setRouteData]=useState([]);
+
+  const calcRoute=(techName)=>{
+    const techPms=pms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
+    const optimized=optimizeRoute(techPms);
+    let totalDist=0;
+    const data=optimized.map((p,i)=>{
+      let dist=0;
+      if(i>0)dist=haversine(optimized[i-1].lat,optimized[i-1].lng,p.lat,p.lng);
+      totalDist+=dist;
+      return{...p,stepDist:Math.round(dist*10)/10,totalDist:Math.round(totalDist*10)/10,step:i+1};
+    });
+    setRouteData(data);setShowRoute(true);
+  };
 
   const depts=[...new Set(pms.map(p=>p.dept).filter(Boolean))].sort();
   const myPms=isT?pms.filter(pm=>assigns[pm.code]===tName):pms;
@@ -251,6 +325,7 @@ export default function App(){
         <button onClick={()=>{setPg("import");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="import"?CL.a:"rgba(255,255,255,.06)",color:pg==="import"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📥 Import</button></>}
         {isT&&<button onClick={()=>{setPg("dash");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="dash"?CL.a:"rgba(255,255,255,.06)",color:pg==="dash"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🏗️ Mes PM</button>}
         <button onClick={()=>{setPg("hist");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="hist"?CL.a:"rgba(255,255,255,.06)",color:pg==="hist"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 CR</button>
+        <button onClick={()=>{setPg("route");setShowRoute(false);}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="route"?CL.a:"rgba(255,255,255,.06)",color:pg==="route"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Tournée</button>
         {isM&&<button onClick={()=>{setPg("team");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="team"?CL.a:"rgba(255,255,255,.06)",color:pg==="team"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>👷 Équipe</button>}
         <button onClick={()=>setUser(null)} style={{padding:"5px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",background:"transparent",color:"#fca5a5",fontFamily:F,fontSize:9,fontWeight:700,cursor:"pointer",marginLeft:4}}>⏏</button>
       </div>
@@ -264,6 +339,7 @@ export default function App(){
       <input ref={impRef} type="file" accept=".csv,.tsv,.txt" onChange={handleImport} style={{display:"none"}}/>
       <button onClick={()=>impRef.current?.click()} style={{...b1,background:"#fff",color:CL.a,border:`2px dashed ${CL.a}`,width:"100%",padding:16,fontSize:13,marginBottom:10}}>📂 Sélectionner CSV / TSV</button>
       {impMsg&&<div style={{marginTop:8,padding:8,borderRadius:6,background:impMsg.includes("importé")?"#dcfce7":"#fee2e2",fontFamily:F,fontSize:12,fontWeight:600,color:impMsg.includes("importé")?"#166534":"#b91c1c"}}>{impMsg}</div>}
+      {geoProgress&&<div style={{marginTop:8,padding:8,borderRadius:6,background:"#dbeafe",fontFamily:F,fontSize:12,fontWeight:600,color:"#1e40af"}}>{geoProgress}</div>}
     </div>
     <div style={crd}>
       <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{pms.length}</strong> PM · <strong>{depts.length}</strong> depts</div>
@@ -300,9 +376,11 @@ export default function App(){
             <div style={{textAlign:"center",fontWeight:800,color:pm.nbIW>=10?"#dc2626":CL.dk,fontSize:12}}>{pm.nbIW}</div>
             <div style={{textAlign:"center"}}><B color={pC(pm.nbIW)}>{pL(pm.nbIW)}</B></div>
             {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?<><B color="purple">{assigns[pm.code]}</B><button onClick={()=>setShowAss(pm.code)} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>setShowAss(pm.code)} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
-            <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center"}}>
+            <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
               <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9}}>+CR</button>
-              {repsFor(pm.code).length>0&&<button onClick={()=>{setPg("hist");setSearch(pm.code);}} style={{...b2,padding:"2px 5px",fontSize:8}}>📋{repsFor(pm.code).length}</button>}
+              {pm.lat?<button onClick={()=>openWaze(pm.lat,pm.lng)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#33ccff",borderColor:"#33ccff"}}>📍</button>
+              :<button onClick={()=>openMapsAddr(pm.adresse)} style={{...b2,padding:"2px 5px",fontSize:8}}>📍</button>}
+              {repsFor(pm.code).length>0&&<button onClick={()=>{setPg("hist");setHistSearch(pm.code);}} style={{...b2,padding:"2px 5px",fontSize:8}}>📋{repsFor(pm.code).length}</button>}
             </div>
           </div>))}
         </div>
@@ -454,8 +532,64 @@ export default function App(){
   </div>);
   };
 
+  // ========== ROUTE / TOURNÉE ==========
+  const RoutePg=()=>{
+    const techsWithPms=isM?[...new Set(Object.values(assigns))]:[];
+    const currentTech=isT?tName:null;
+    const geoPms=myPms.filter(p=>p.lat&&p.lng);
+    const nonGeoPms=myPms.filter(p=>!p.lat||!p.lng);
+
+    return(<div style={{padding:16,maxWidth:700}}>
+      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:12}}>🗺️ Tournée optimisée</h2>
+
+      {isM&&<div style={{...crd}}>
+        <h3 style={sT}>Calculer une tournée</h3>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {techsWithPms.map(t=>{const n=pms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
+            <button key={t} onClick={()=>calcRoute(t)} style={{...b1,padding:"8px 14px",fontSize:12}}>{t} ({n} PM)</button>
+          );})}
+        </div>
+        {techsWithPms.length===0&&<div style={{fontFamily:F,fontSize:12,color:CL.sb}}>Affectez des PM aux techniciens d'abord.</div>}
+      </div>}
+
+      {isT&&<div style={{...crd}}>
+        <button onClick={()=>calcRoute(tName)} style={{...b1,width:"100%",padding:"14px",fontSize:14}}>🗺️ Calculer ma tournée ({geoPms.length} PM)</button>
+        {nonGeoPms.length>0&&<div style={{fontFamily:F,fontSize:11,color:CL.sb,marginTop:6}}>⚠️ {nonGeoPms.length} PM sans coordonnées (non géocodés)</div>}
+      </div>}
+
+      {showRoute&&routeData.length>0&&(<div style={{...crd}}>
+        <h3 style={sT}>📍 Parcours optimisé — {routeData.length} étapes · {routeData[routeData.length-1]?.totalDist||0} km</h3>
+        
+        <button onClick={()=>{
+          const pts=routeData.map(p=>`${p.lat},${p.lng}`);
+          const origin=pts[0];const dest=pts[pts.length-1];const waypoints=pts.slice(1,-1).join("|");
+          window.open(`https://www.google.com/maps/dir/${pts.join("/")}`, "_blank");
+        }} style={{...b1,width:"100%",padding:"12px",fontSize:13,marginBottom:12,background:"#1a73e8"}}>
+          🗺️ Ouvrir l'itinéraire complet dans Google Maps
+        </button>
+
+        {routeData.map((p,i)=>(
+          <div key={p.code} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<routeData.length-1?`1px solid ${CL.bd}`:"none"}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:CL.a,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:F,fontSize:12,fontWeight:800,flexShrink:0}}>{p.step}</div>
+            <div style={{flex:1}}>
+              <div style={{fontFamily:"monospace",fontSize:11,fontWeight:700,color:CL.dk}}>{p.code}</div>
+              <div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{p.adresse}</div>
+              {i>0&&<div style={{fontFamily:F,fontSize:10,color:"#7c3aed",fontWeight:600}}>↳ {p.stepDist} km depuis l'étape précédente</div>}
+            </div>
+            <div style={{display:"flex",gap:4,flexShrink:0}}>
+              <button onClick={()=>openWaze(p.lat,p.lng)} style={{...b2,padding:"4px 8px",fontSize:9,color:"#33ccff",borderColor:"#33ccff"}}>Waze</button>
+              <button onClick={()=>openMaps(p.lat,p.lng,p.code)} style={{...b2,padding:"4px 8px",fontSize:9,color:"#1a73e8",borderColor:"#1a73e8"}}>Maps</button>
+            </div>
+          </div>
+        ))}
+      </div>)}
+
+      {showRoute&&routeData.length===0&&<div style={{...crd,textAlign:"center",padding:30}}><div style={{fontSize:30}}>📍</div><div style={{fontFamily:F,fontSize:13,color:CL.sb,marginTop:8}}>Aucun PM géocodé pour ce technicien. Réimportez les PM pour géocoder les adresses.</div></div>}
+    </div>);
+  };
+
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="route"&&RoutePg()}
   </div>);
 }
