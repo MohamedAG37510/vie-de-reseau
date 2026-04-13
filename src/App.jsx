@@ -43,25 +43,30 @@ export default function App(){
   const [newMgrCode,setNewMgrCode]=useState("");
   const [histSearch,setHistSearch]=useState("");
   const [localCodes,setLocalCodes]=useState({});
-  const [resolvedSearch,setResolvedSearch]=useState("");
+  const [iwItems,setIwItems]=useState([]);
+  const [showIWPanel,setShowIWPanel]=useState(null); // pm code or null
+  const [iwForm,setIwForm]=useState({ref_iw:"",position:"",commentaire:""});
+  const [iwEditId,setIwEditId]=useState(null);
   const fileRef=useRef(null);
   const impRef=useRef(null);
 
   // ========== SUPABASE DATA LOADING ==========
   const loadAll = useCallback(async()=>{
     try{
-      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData}] = await Promise.all([
+      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
         supabase.from("techs").select("*").order("name"),
         supabase.from("reports").select("*").order("created_at",{ascending:false}),
         supabase.from("assignments").select("*"),
         supabase.from("config").select("*"),
+        supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
       ]);
-      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null})));
+      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
       if(assData){const a={};assData.forEach(x=>a[x.pm_code]=x.tech_name);setAssigns(a);}
       if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
+      if(iwData) setIwItems(iwData);
     }catch(e){console.error("Load error:",e);}
     setLoading(false);
   },[]);
@@ -85,6 +90,7 @@ export default function App(){
       .on("postgres_changes",{event:"*",schema:"public",table:"pms"},debouncedLoad)
       .on("postgres_changes",{event:"*",schema:"public",table:"reports"},debouncedLoad)
       .on("postgres_changes",{event:"*",schema:"public",table:"assignments"},debouncedLoad)
+      .on("postgres_changes",{event:"*",schema:"public",table:"iw_items"},debouncedLoad)
       .subscribe();
     return ()=>{clearTimeout(timer);supabase.removeChannel(ch);};
   },[loadAll]);
@@ -99,7 +105,7 @@ export default function App(){
   const saveR=async(allReps)=>{setReps(allReps);};
 
   const insertReport=async(r)=>{
-    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:r.mesures,actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos};
+    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:r.mesures,actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[]};
     await supabase.from("reports").insert(row);
     await loadAll();
   };
@@ -137,6 +143,32 @@ export default function App(){
     await supabase.from("config").upsert({key:"mgr_code",value:code},{onConflict:"key"});
     setMgrCode(code);setNewMgrCode("");
   };
+
+  // ========== IW ITEMS CRUD (Manager) ==========
+  const iwForPM=code=>iwItems.filter(iw=>iw.pm_code===code);
+
+  const addIW=async(pmCode)=>{
+    if(!iwForm.ref_iw.trim())return;
+    const id=`iw_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+    const row={id,pm_code:pmCode,ref_iw:iwForm.ref_iw.trim(),position:iwForm.position.trim(),commentaire:iwForm.commentaire.trim()};
+    await supabase.from("iw_items").insert(row);
+    setIwItems(prev=>[...prev,{...row,created_at:new Date().toISOString()}]);
+    setIwForm({ref_iw:"",position:"",commentaire:""});
+  };
+
+  const updateIW=async(id)=>{
+    await supabase.from("iw_items").update({ref_iw:iwForm.ref_iw.trim(),position:iwForm.position.trim(),commentaire:iwForm.commentaire.trim()}).eq("id",id);
+    setIwItems(prev=>prev.map(iw=>iw.id===id?{...iw,ref_iw:iwForm.ref_iw.trim(),position:iwForm.position.trim(),commentaire:iwForm.commentaire.trim()}:iw));
+    setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);
+  };
+
+  const deleteIW=async(id)=>{
+    await supabase.from("iw_items").delete().eq("id",id);
+    setIwItems(prev=>prev.filter(iw=>iw.id!==id));
+  };
+
+  const startEditIW=(iw)=>{setIwEditId(iw.id);setIwForm({ref_iw:iw.ref_iw,position:iw.position||"",commentaire:iw.commentaire||""});};
+  const cancelEditIW=()=>{setIwEditId(null);setIwForm({ref_iw:"",position:"",commentaire:""});};
 
   // ========== DELETE PMS ==========
   const resetPms=async()=>{
@@ -209,24 +241,11 @@ export default function App(){
         if(i%5===4)await new Promise(r=>setTimeout(r,150));
       }
 
-      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng,resolved:false,resolved_at:null}));
+      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng}));
       const{error}=await supabase.from("pms").upsert(rows,{onConflict:"code"});
       if(error){setImpMsg("Erreur: "+error.message);setGeoProgress("");return;}
-
-      // Mark PMs absent from new import as resolved
-      const importedCodes=new Set(np.map(p=>p.code));
-      const activePmsBefore=pms.filter(p=>!p.resolved);
-      const toResolve=activePmsBefore.filter(p=>!importedCodes.has(p.code));
-      let resolvedCount=0;
-      if(toResolve.length>0){
-        const now=new Date().toISOString();
-        const resCodes=toResolve.map(p=>p.code);
-        await supabase.from("pms").update({resolved:true,resolved_at:now}).in("code",resCodes);
-        resolvedCount=toResolve.length;
-      }
-
       const geocoded=geoResults.filter(p=>p.lat).length;
-      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés${resolvedCount>0?` · ${resolvedCount} PM résolus`:""}`);
+      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés`);
       setGeoProgress("");
       await loadAll();
     };
@@ -264,7 +283,7 @@ export default function App(){
   const [routeData,setRouteData]=useState([]);
 
   const calcRoute=(techName)=>{
-    const techPms=activePms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
+    const techPms=pms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
     const optimized=optimizeRoute(techPms);
     let totalDist=0;
     const data=optimized.map((p,i)=>{
@@ -276,10 +295,8 @@ export default function App(){
     setRouteData(data);setShowRoute(true);
   };
 
-  const activePms=pms.filter(p=>!p.resolved);
-  const resolvedPms=pms.filter(p=>p.resolved);
-  const depts=[...new Set(activePms.map(p=>p.dept).filter(Boolean))].sort();
-  const myPms=isT?activePms.filter(pm=>assigns[pm.code]===tName):activePms;
+  const depts=[...new Set(pms.map(p=>p.dept).filter(Boolean))].sort();
+  const myPms=isT?pms.filter(pm=>assigns[pm.code]===tName):pms;
   const filtered=myPms.filter(pm=>{
     const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
     const md=fDept==="all"||pm.dept===fDept;
@@ -289,7 +306,11 @@ export default function App(){
   const myReps=isT?reps.filter(r=>r.tech===tName):reps;
   const repsFor=code=>myReps.filter(r=>r.pmCode===code);
 
-  const startCR=pm=>{setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:""});setPg("form");};
+  const startCR=pm=>{
+    const pmIws=iwForPM(pm.code);
+    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,position:iw.position||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:""}));
+    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
+  };
   const submitCR=async()=>{const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");};
 
   // ========== STYLES ==========
@@ -343,7 +364,6 @@ export default function App(){
         <button onClick={()=>{setPg("hist");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="hist"?CL.a:"rgba(255,255,255,.06)",color:pg==="hist"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 CR</button>
         <button onClick={()=>{setPg("route");setShowRoute(false);}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="route"?CL.a:"rgba(255,255,255,.06)",color:pg==="route"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Tournée</button>
         {isM&&<button onClick={()=>{setPg("team");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="team"?CL.a:"rgba(255,255,255,.06)",color:pg==="team"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>👷 Équipe</button>}
-        {isM&&<button onClick={()=>{setPg("resolved");setResolvedSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="resolved"?CL.a:"rgba(255,255,255,.06)",color:pg==="resolved"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>✅ Résolus{resolvedPms.length>0?` (${resolvedPms.length})`:""}</button>}
         <button onClick={()=>setUser(null)} style={{padding:"5px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",background:"transparent",color:"#fca5a5",fontFamily:F,fontSize:9,fontWeight:700,cursor:"pointer",marginLeft:4}}>⏏</button>
       </div>
     </div>
@@ -359,22 +379,22 @@ export default function App(){
       {geoProgress&&<div style={{marginTop:8,padding:8,borderRadius:6,background:"#dbeafe",fontFamily:F,fontSize:12,fontWeight:600,color:"#1e40af"}}>{geoProgress}</div>}
     </div>
     <div style={crd}>
-      <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{activePms.length}</strong> PM actifs · <strong>{resolvedPms.length}</strong> résolus · <strong>{depts.length}</strong> depts</div>
+      <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{pms.length}</strong> PM · <strong>{depts.length}</strong> depts</div>
       {pms.length>0&&<button onClick={resetPms} style={{...b2,marginTop:10,fontSize:11,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Réinitialiser</button>}
     </div>
   </div>);
 
   // ========== DASHBOARD ==========
   const Dash=()=>{
-    const aff=Object.keys(assigns).filter(c=>activePms.some(p=>p.code===c)).length;
-    const stats=isM?[{l:"PM actifs",v:activePms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:activePms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"CR",v:reps.length,i:"📝",c:"#059669"},{l:"Affectés",v:aff,i:"✅",c:"#7c3aed"},{l:"Non aff.",v:activePms.length-aff,i:"⚠️",c:activePms.length-aff>0?"#dc2626":"#059669"},{l:"Résolus",v:resolvedPms.length,i:"✅",c:"#059669"}]
+    const aff=Object.keys(assigns).length;
+    const stats=isM?[{l:"PM",v:pms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:pms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"CR",v:reps.length,i:"📝",c:"#059669"},{l:"Affectés",v:aff,i:"✅",c:"#7c3aed"},{l:"Non aff.",v:pms.length-aff,i:"⚠️",c:pms.length-aff>0?"#dc2626":"#059669"}]
     :[{l:"Mes PM",v:myPms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:myPms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"Mes CR",v:myReps.length,i:"📝",c:"#059669"}];
     return(<div style={{padding:16}}>
       {myPms.length===0?(
         <div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>{isM?"📥":"📭"}</div><h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginTop:12}}>{isM?"Aucun PM":"Aucun PM affecté"}</h2><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>{isM?"Importez votre fichier.":"Contactez votre manager."}</p>{isM&&<button onClick={()=>setPg("import")} style={{...b1,marginTop:16}}>📥 Importer</button>}</div>
       ):(<>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,6)},1fr)`,gap:8,marginBottom:16}}>
-        {stats.map((s,i)=>(<div key={i} onClick={s.l==="Résolus"?()=>setPg("resolved"):undefined} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0,cursor:s.l==="Résolus"?"pointer":"default"}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,5)},1fr)`,gap:8,marginBottom:16}}>
+        {stats.map((s,i)=>(<div key={i} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <input placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:260,fontSize:13}}/>
@@ -395,6 +415,7 @@ export default function App(){
             {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?<><B color="purple">{assigns[pm.code]}</B><button onClick={()=>setShowAss(pm.code)} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>setShowAss(pm.code)} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
             <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
               <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9}}>+CR</button>
+              {isM&&<button onClick={()=>{setShowIWPanel(pm.code);setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);}} style={{...b2,padding:"2px 5px",fontSize:8,color:iwForPM(pm.code).length>0?"#059669":"#7c3aed",borderColor:iwForPM(pm.code).length>0?"#86efac":"#c4b5fd"}}>{iwForPM(pm.code).length>0?`📋${iwForPM(pm.code).length}`:"📋+"}</button>}
               {pm.lat?<button onClick={()=>openWaze(pm.lat,pm.lng)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#33ccff",borderColor:"#33ccff"}}>📍</button>
               :<button onClick={()=>openMapsAddr(pm.adresse)} style={{...b2,padding:"2px 5px",fontSize:8}}>📍</button>}
               {repsFor(pm.code).length>0&&<button onClick={()=>{setPg("hist");setHistSearch(pm.code);}} style={{...b2,padding:"2px 5px",fontSize:8}}>📋{repsFor(pm.code).length}</button>}
@@ -409,6 +430,43 @@ export default function App(){
         </div>
         {assigns[showAss]&&<button onClick={()=>assignTech(showAss,null)} style={{...b2,width:"100%",marginTop:8,fontSize:11,color:"#dc2626"}}>Retirer</button>}
         <button onClick={()=>setShowAss(null)} style={{...b2,width:"100%",marginTop:6}}>Fermer</button>
+      </div></div>)}
+      {showIWPanel&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowIWPanel(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:440,maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{fontFamily:F,color:CL.dk,fontSize:14,fontWeight:800,marginBottom:4}}>📋 Références IW — {showIWPanel}</h3>
+        <p style={{fontFamily:F,fontSize:10,color:CL.sb,marginBottom:14}}>Le technicien devra cocher chaque IW lors du CR.</p>
+        {iwForPM(showIWPanel).map(iw=>(
+          <div key={iw.id} style={{padding:10,marginBottom:6,borderRadius:8,border:`1px solid ${CL.bd}`,background:iwEditId===iw.id?"#fffbeb":"#fafaf6"}}>
+            {iwEditId===iw.id?<>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                <div><label style={lbl}>Réf IW *</label><input value={iwForm.ref_iw} onChange={e=>setIwForm(f=>({...f,ref_iw:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+                <div><label style={lbl}>Position</label><input value={iwForm.position} onChange={e=>setIwForm(f=>({...f,position:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+              </div>
+              <div style={{marginBottom:6}}><label style={lbl}>Commentaire</label><input value={iwForm.commentaire} onChange={e=>setIwForm(f=>({...f,commentaire:e.target.value}))} style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+              <div style={{display:"flex",gap:4}}><button onClick={()=>updateIW(iw.id)} style={{...b1,padding:"4px 10px",fontSize:10}}>✓ Sauver</button><button onClick={cancelEditIW} style={{...b2,padding:"4px 10px",fontSize:10}}>Annuler</button></div>
+            </>:<div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontFamily:"monospace",fontSize:12,fontWeight:800,color:CL.dk}}>{iw.ref_iw}</div>
+                {iw.position&&<div style={{fontFamily:F,fontSize:9,color:CL.sb}}>📍 {iw.position}</div>}
+                {iw.commentaire&&<div style={{fontFamily:F,fontSize:9,color:"#92400e",marginTop:2}}>💬 {iw.commentaire}</div>}
+              </div>
+              <div style={{display:"flex",gap:3}}>
+                <button onClick={()=>startEditIW(iw)} style={{...b2,padding:"2px 6px",fontSize:8}}>✏️</button>
+                <button onClick={()=>deleteIW(iw.id)} style={{...b2,padding:"2px 6px",fontSize:8,color:"#dc2626"}}>🗑️</button>
+              </div>
+            </div>}
+          </div>
+        ))}
+        {iwForPM(showIWPanel).length===0&&<div style={{textAlign:"center",padding:16,color:CL.sb,fontFamily:F,fontSize:12}}>Aucune IW référencée.</div>}
+        {!iwEditId&&<div style={{marginTop:10,padding:12,borderRadius:8,border:`2px dashed ${CL.a}`,background:"#fef2f2"}}>
+          <div style={{fontFamily:F,fontSize:11,fontWeight:700,color:CL.a,marginBottom:8}}>+ Ajouter une IW</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+            <div><label style={lbl}>Réf IW *</label><input value={iwForm.ref_iw} onChange={e=>setIwForm(f=>({...f,ref_iw:e.target.value}))} placeholder="Ex: IW-2024-0142" style={{...inp,fontSize:11,padding:"5px 8px"}} onKeyDown={e=>{if(e.key==="Enter")addIW(showIWPanel);}}/></div>
+            <div><label style={lbl}>Position</label><input value={iwForm.position} onChange={e=>setIwForm(f=>({...f,position:e.target.value}))} placeholder="Ex: P3-C2" style={{...inp,fontSize:11,padding:"5px 8px"}}/></div>
+          </div>
+          <div style={{marginBottom:6}}><label style={lbl}>Commentaire</label><input value={iwForm.commentaire} onChange={e=>setIwForm(f=>({...f,commentaire:e.target.value}))} placeholder="Note pour le tech..." style={{...inp,fontSize:11,padding:"5px 8px"}} onKeyDown={e=>{if(e.key==="Enter")addIW(showIWPanel);}}/></div>
+          <button onClick={()=>addIW(showIWPanel)} disabled={!iwForm.ref_iw.trim()} style={{...b1,padding:"6px 14px",fontSize:11,opacity:iwForm.ref_iw.trim()?1:.4}}>+ Ajouter</button>
+        </div>}
+        <button onClick={()=>setShowIWPanel(null)} style={{...b2,width:"100%",marginTop:10}}>Fermer</button>
       </div></div>)}
     </div>);
   };
@@ -444,6 +502,25 @@ export default function App(){
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><input type="checkbox" checked={form.suivi} onChange={e=>setForm(f=>({...f,suivi:e.target.checked}))} style={{width:16,height:16,accentColor:CL.a}}/><label style={{fontFamily:F,fontSize:12,fontWeight:700}}>Suivi nécessaire</label></div>
         {form.suivi&&<textarea value={form.suiviTxt} onChange={e=>setForm(f=>({...f,suiviTxt:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/>}
       </div>
+      {form.iwResults?.length>0&&<div style={crd}><h3 style={sT}>📋 Checklist IW ({form.iwResults.filter(iw=>iw.status).length}/{form.iwResults.length})</h3>
+        {form.iwResults.map((iw,i)=>{
+          const stColors={Fait:"#059669","Pas fait":"#dc2626",Impossible:"#7c3aed"};
+          return(<div key={iw.id} style={{padding:12,marginBottom:8,borderRadius:8,border:`1.5px solid ${iw.status?stColors[iw.status]||CL.bd:CL.bd}`,background:iw.status?(iw.status==="Fait"?"#f0fdf4":iw.status==="Impossible"?"#faf5ff":"#fef2f2"):"#fff"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+              <div>
+                <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{iw.ref_iw}</div>
+                {iw.position&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>📍 Position : {iw.position}</div>}
+              </div>
+              <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"À traiter"}</B>
+            </div>
+            {iw.commentaire_mgr&&<div style={{fontFamily:F,fontSize:10,color:"#92400e",background:"#fef3c7",padding:"4px 8px",borderRadius:4,marginBottom:6}}>💬 Manager : {iw.commentaire_mgr}</div>}
+            <div style={{display:"flex",gap:4,marginBottom:6}}>
+              {["Fait","Pas fait","Impossible"].map(st=><button key={st} onClick={()=>{const nr=[...form.iwResults];nr[i]={...nr[i],status:st};setForm(f=>({...f,iwResults:nr}));}} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${iw.status===st?(stColors[st]||CL.bd):CL.bd}`,background:iw.status===st?(st==="Fait"?"#dcfce7":st==="Impossible"?"#f3e8ff":"#fee2e2"):"#fff",color:iw.status===st?(stColors[st]||CL.sb):CL.sb,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>{iw.status===st?"✓ ":""}{st}</button>)}
+            </div>
+            <input value={iw.commentaire_tech} onChange={e=>{const nr=[...form.iwResults];nr[i]={...nr[i],commentaire_tech:e.target.value};setForm(f=>({...f,iwResults:nr}));}} placeholder="Commentaire tech..." style={{...inp,fontSize:11,padding:"5px 8px"}}/>
+          </div>);
+        })}
+      </div>}
       <div style={crd}><h3 style={sT}>📸 Photos</h3>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhotos} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current?.click()} style={{...b1,background:"#fff",color:CL.a,border:`2px dashed ${CL.a}`,width:"100%",padding:14,marginBottom:10,fontSize:12}}>📷 Prendre / ajouter photos</button>
@@ -488,6 +565,20 @@ export default function App(){
       {r.mesures&&<div style={{marginBottom:10}}><div style={lbl}>Mesures</div><div style={{fontFamily:"monospace",fontSize:10,background:"#f1f5f9",padding:6,borderRadius:4,whiteSpace:"pre-wrap"}}>{r.mesures}</div></div>}
       {r.materiel&&<div style={{marginBottom:10}}><div style={lbl}>Matériel</div><div style={{fontFamily:F,fontSize:11,whiteSpace:"pre-wrap"}}>{r.materiel}</div></div>}
       {r.obs&&<div style={{marginBottom:10}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:11,fontStyle:"italic",whiteSpace:"pre-wrap"}}>{r.obs}</div></div>}
+      {(r.iw_results||r.iwResults||[]).length>0&&<div style={{marginBottom:12}}>
+        <div style={{...lbl,marginBottom:6}}>📋 Checklist IW ({(r.iw_results||r.iwResults).filter(iw=>iw.status==="Fait").length}/{(r.iw_results||r.iwResults).length})</div>
+        {(r.iw_results||r.iwResults).map(iw=>{
+          const stC={Fait:"#059669","Pas fait":"#dc2626",Impossible:"#7c3aed"};
+          return(<div key={iw.id||iw.ref_iw} style={{padding:8,marginBottom:4,borderRadius:6,border:`1px solid ${stC[iw.status]||CL.bd}`,background:iw.status==="Fait"?"#f0fdf4":iw.status==="Impossible"?"#faf5ff":iw.status==="Pas fait"?"#fef2f2":"#f9f9f7"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><span style={{fontFamily:"monospace",fontSize:11,fontWeight:800}}>{iw.ref_iw}</span>{iw.position&&<span style={{fontFamily:F,fontSize:9,color:CL.sb,marginLeft:6}}>📍 {iw.position}</span>}</div>
+              <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"—"}</B>
+            </div>
+            {iw.commentaire_mgr&&<div style={{fontFamily:F,fontSize:9,color:"#92400e",marginTop:3}}>💬 Mgr: {iw.commentaire_mgr}</div>}
+            {iw.commentaire_tech&&<div style={{fontFamily:F,fontSize:9,color:"#1e40af",marginTop:2}}>💬 Tech: {iw.commentaire_tech}</div>}
+          </div>);
+        })}
+      </div>}
       {r.suivi&&<div style={{background:"#fef3c7",border:"1.5px solid #f59e0b",borderRadius:6,padding:8,marginBottom:10}}><div style={{fontFamily:F,fontSize:10,fontWeight:800,color:"#92400e"}}>⚠️ SUIVI</div><div style={{fontFamily:F,fontSize:11,color:"#78350f"}}>{suiviTxt}</div></div>}
       {r.photos?.length>0&&<div><div style={{...lbl,marginBottom:6}}>📸 Photos ({r.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{r.photos.map((p,i)=><div key={i} style={{borderRadius:4,overflow:"hidden",border:`1px solid ${CL.bd}`}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/>{p.label&&<div style={{padding:2,fontFamily:F,fontSize:9,color:CL.sb,textAlign:"center"}}>{p.label}</div>}</div>)}</div></div>}
     </div></div>);
@@ -549,66 +640,6 @@ export default function App(){
   </div>);
   };
 
-  // ========== RESOLVED PMs (Manager only) ==========
-  const reactivatePM=async(code)=>{
-    await supabase.from("pms").update({resolved:false,resolved_at:null}).eq("code",code);
-    await loadAll();
-  };
-
-  const ResolvedPg=()=>{
-    const fl=resolvedPms.filter(p=>{
-      if(!resolvedSearch)return true;
-      const s=resolvedSearch.toLowerCase();
-      return p.code.toLowerCase().includes(s)||p.adresse.toLowerCase().includes(s)||(assigns[p.code]||"").toLowerCase().includes(s);
-    });
-    const resDepts=[...new Set(resolvedPms.map(p=>p.dept).filter(Boolean))].sort();
-
-    if(viewR)return VR({r:viewR});
-
-    return(<div style={{padding:16}}>
-      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:4}}>✅ PM Résolus</h2>
-      <p style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:14}}>PM absents du dernier import — considérés comme traités.</p>
-
-      {resolvedPms.length===0?
-        <div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>🎉</div><h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginTop:12}}>Aucun PM résolu</h3><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>Les PM absents du prochain import apparaîtront ici.</p></div>
-      :<>
-        <input placeholder="🔍 Rechercher code, adresse, tech..." value={resolvedSearch} onChange={e=>setResolvedSearch(e.target.value)} style={{...inp,maxWidth:400,marginBottom:14,fontSize:13}}/>
-
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
-          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #059669",marginBottom:0}}><span style={{fontSize:20}}>✅</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resolvedPms.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Résolus</div></div></div>
-          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #2563eb",marginBottom:0}}><span style={{fontSize:20}}>📝</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resolvedPms.reduce((s,p)=>reps.filter(r=>(r.pmCode||r.pm_code)===p.code).length+s,0)}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>CR associés</div></div></div>
-          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #7c3aed",marginBottom:0}}><span style={{fontSize:20}}>🏢</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resDepts.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Depts</div></div></div>
-        </div>
-
-        <div style={{...crd,padding:0,overflow:"hidden"}}>
-          <div style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",background:"#059669",color:"#fff",fontFamily:F,fontSize:9,fontWeight:700,padding:"7px 10px",textTransform:"uppercase"}}>
-            <div>Code</div><div>Dpt</div><div>Adresse</div><div style={{textAlign:"center"}}>CR</div><div style={{textAlign:"center"}}>Résolu le</div><div style={{textAlign:"center"}}>Actions</div>
-          </div>
-          <div style={{maxHeight:450,overflowY:"auto"}}>
-            {fl.map((pm,i)=>{
-              const pmReps=reps.filter(r=>(r.pmCode||r.pm_code)===pm.code);
-              const resDate=pm.resolved_at?new Date(pm.resolved_at).toLocaleDateString("fr-FR"):"—";
-              return(<div key={pm.code} style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",padding:"8px 10px",fontFamily:F,fontSize:11,background:i%2===0?"#fff":"#f0fdf4",borderBottom:`1px solid ${CL.bd}`,alignItems:"center"}}>
-                <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}</div>
-                <div style={{color:CL.sb,fontSize:10}}>{pm.dept}</div>
-                <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
-                <div style={{textAlign:"center"}}>
-                  {pmReps.length>0?<button onClick={()=>{setPg("hist");setHistSearch(pm.code);}} style={{...b2,padding:"2px 7px",fontSize:9,color:"#059669",borderColor:"#86efac"}}>📋 {pmReps.length}</button>
-                  :<span style={{fontFamily:F,fontSize:10,color:CL.sb}}>—</span>}
-                </div>
-                <div style={{textAlign:"center",fontFamily:F,fontSize:9,color:CL.sb}}>{resDate}</div>
-                <div style={{textAlign:"center"}}>
-                  <button onClick={()=>reactivatePM(pm.code)} style={{...b2,padding:"3px 8px",fontSize:9,color:"#2563eb",borderColor:"#93c5fd"}} title="Réactiver ce PM">🔄 Réactiver</button>
-                </div>
-              </div>);
-            })}
-          </div>
-        </div>
-        {fl.length===0&&resolvedSearch&&<div style={{textAlign:"center",padding:30,color:CL.sb,fontFamily:F}}>Aucun PM résolu correspondant.</div>}
-      </>}
-    </div>);
-  };
-
   // ========== ROUTE / TOURNÉE ==========
   const RoutePg=()=>{
     const techsWithPms=isM?[...new Set(Object.values(assigns))]:[];
@@ -622,7 +653,7 @@ export default function App(){
       {isM&&<div style={{...crd}}>
         <h3 style={sT}>Calculer une tournée</h3>
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {techsWithPms.map(t=>{const n=activePms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
+          {techsWithPms.map(t=>{const n=pms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
             <button key={t} onClick={()=>calcRoute(t)} style={{...b1,padding:"8px 14px",fontSize:12}}>{t} ({n} PM)</button>
           );})}
         </div>
@@ -667,6 +698,6 @@ export default function App(){
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="route"&&RoutePg()}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="route"&&RoutePg()}
   </div>);
 }
