@@ -64,16 +64,25 @@ export default function App(){
 
   useEffect(()=>{loadAll();},[loadAll]);
 
-  // Realtime subscriptions
+  // Realtime subscriptions - only on tables that need it, with long debounce
+  const typingRef=useRef(false);
+  const typingTimer=useRef(null);
   useEffect(()=>{
+    const onFocusIn=(e)=>{if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'){typingRef.current=true;clearTimeout(typingTimer.current);}};
+    const onFocusOut=(e)=>{if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'){typingTimer.current=setTimeout(()=>{typingRef.current=false;},3000);}};
+    document.addEventListener('focusin',onFocusIn);
+    document.addEventListener('focusout',onFocusOut);
+    return ()=>{document.removeEventListener('focusin',onFocusIn);document.removeEventListener('focusout',onFocusOut);};
+  },[]);
+  useEffect(()=>{
+    let timer=null;
+    const debouncedLoad=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!typingRef.current)loadAll();},5000);};
     const ch = supabase.channel("all-changes")
-      .on("postgres_changes",{event:"*",schema:"public",table:"pms"},()=>loadAll())
-      .on("postgres_changes",{event:"*",schema:"public",table:"techs"},()=>loadAll())
-      .on("postgres_changes",{event:"*",schema:"public",table:"reports"},()=>loadAll())
-      .on("postgres_changes",{event:"*",schema:"public",table:"assignments"},()=>loadAll())
-      .on("postgres_changes",{event:"*",schema:"public",table:"config"},()=>loadAll())
+      .on("postgres_changes",{event:"*",schema:"public",table:"pms"},debouncedLoad)
+      .on("postgres_changes",{event:"*",schema:"public",table:"reports"},debouncedLoad)
+      .on("postgres_changes",{event:"*",schema:"public",table:"assignments"},debouncedLoad)
       .subscribe();
-    return ()=>{supabase.removeChannel(ch);};
+    return ()=>{clearTimeout(timer);supabase.removeChannel(ch);};
   },[loadAll]);
 
   // ========== SUPABASE MUTATIONS ==========
@@ -110,7 +119,7 @@ export default function App(){
 
   const updateTechCode=async(name,code)=>{
     await supabase.from("techs").update({code}).eq("name",name);
-    setTechs(techs.map(t=>t.name===name?{...t,code}:t));
+    setTechs(prev=>prev.map(t=>t.name===name?{...t,code}:t));
   };
 
   const assignTech=async(pmCode,techName)=>{
@@ -396,14 +405,18 @@ export default function App(){
   };
 
   // ========== TEAM ==========
-  const Team=()=>(<div style={{padding:16,maxWidth:520}}>
+  const Team=()=>{
+    const [localCodes,setLocalCodes]=useState(()=>{const o={};techs.forEach(t=>{o[t.name]=t.code||""});return o;});
+    const handleCodeChange=(name,val)=>{setLocalCodes(prev=>({...prev,[name]:val}));};
+    const handleCodeBlur=(name)=>{const code=localCodes[name]||"";updateTechCode(name,code);};
+    return(<div style={{padding:16,maxWidth:520}}>
     <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:12}}>👷 Équipe & Codes</h2>
     <div style={crd}>{techs.map((t,i)=>{const na=Object.values(assigns).filter(a=>a===t.name).length;const nc=reps.filter(r=>r.tech===t.name).length;return(
       <div key={t.name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<techs.length-1?`1px solid ${CL.bd}`:"none"}}>
         <div style={{flex:1}}><div style={{fontFamily:F,fontSize:13,fontWeight:700}}>{t.name}</div><div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{na} PM · {nc} CR</div></div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>Code:</span>
-          <input value={t.code||""} onChange={e=>updateTechCode(t.name,e.target.value)} placeholder="----" style={{...inp,width:65,fontSize:12,padding:"3px 5px",textAlign:"center",letterSpacing:2,fontFamily:"monospace"}}/>
+          <input value={localCodes[t.name]||""} onChange={e=>handleCodeChange(t.name,e.target.value)} onBlur={()=>handleCodeBlur(t.name)} placeholder="----" style={{...inp,width:65,fontSize:12,padding:"3px 5px",textAlign:"center",letterSpacing:2,fontFamily:"monospace"}}/>
           <button onClick={()=>removeTech(t.name)} style={{...b2,padding:"2px 5px",fontSize:9,color:"#dc2626"}}>✕</button>
         </div>
       </div>);})}</div>
@@ -416,9 +429,10 @@ export default function App(){
       </div>
     </div>
   </div>);
+  };
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    <Head/>{pg==="dash"&&<Dash/>}{pg==="import"&&isM&&<ImportPg/>}{pg==="form"&&<FormCR/>}{pg==="ok"&&<OkPg/>}{pg==="hist"&&<Hist/>}{pg==="team"&&isM&&<Team/>}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}
   </div>);
 }
