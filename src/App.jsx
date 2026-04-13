@@ -43,8 +43,10 @@ export default function App(){
   const [newMgrCode,setNewMgrCode]=useState("");
   const [histSearch,setHistSearch]=useState("");
   const [localCodes,setLocalCodes]=useState({});
+  const [lightbox,setLightbox]=useState(null); // {photos:[], index:0}
   const fileRef=useRef(null);
   const impRef=useRef(null);
+  const reportRef=useRef(null);
 
   // ========== SUPABASE DATA LOADING ==========
   const loadAll = useCallback(async()=>{
@@ -276,6 +278,136 @@ export default function App(){
   const startCR=pm=>{setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:""});setPg("form");};
   const submitCR=async()=>{const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");};
 
+  // ========== LIGHTBOX ==========
+  const openLightbox=(photos,index=0)=>setLightbox({photos,index});
+  const closeLightbox=()=>setLightbox(null);
+  const lbPrev=()=>setLightbox(lb=>({...lb,index:(lb.index-1+lb.photos.length)%lb.photos.length}));
+  const lbNext=()=>setLightbox(lb=>({...lb,index:(lb.index+1)%lb.photos.length}));
+  const lbDownload=()=>{
+    if(!lightbox)return;
+    const p=lightbox.photos[lightbox.index];
+    const a=document.createElement("a");
+    a.href=p.data;
+    a.download=p.label||p.name||`photo_${lightbox.index+1}.jpg`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+  };
+  const lbDownloadAll=()=>{
+    if(!lightbox)return;
+    lightbox.photos.forEach((p,i)=>{
+      setTimeout(()=>{
+        const a=document.createElement("a");
+        a.href=p.data;
+        a.download=p.label||p.name||`photo_${i+1}.jpg`;
+        document.body.appendChild(a);a.click();document.body.removeChild(a);
+      },i*300);
+    });
+  };
+
+  useEffect(()=>{
+    if(!lightbox)return;
+    const h=e=>{
+      if(e.key==="Escape")closeLightbox();
+      if(e.key==="ArrowLeft")lbPrev();
+      if(e.key==="ArrowRight")lbNext();
+    };
+    window.addEventListener("keydown",h);
+    return()=>window.removeEventListener("keydown",h);
+  },[lightbox]);
+
+  const Lightbox=()=>{
+    if(!lightbox)return null;
+    const p=lightbox.photos[lightbox.index];
+    const multi=lightbox.photos.length>1;
+    return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.92)",zIndex:9999,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",backdropFilter:"blur(8px)"}} onClick={closeLightbox}>
+      <div style={{position:"absolute",top:12,right:12,display:"flex",gap:8,zIndex:10001}}>
+        <button onClick={e=>{e.stopPropagation();lbDownload();}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#fff",fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",backdropFilter:"blur(4px)",transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.15)"}>⬇ Télécharger</button>
+        {multi&&<button onClick={e=>{e.stopPropagation();lbDownloadAll();}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#fff",fontFamily:F,fontSize:12,fontWeight:700,cursor:"pointer",backdropFilter:"blur(4px)",transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.15)"}>⬇ Tout ({lightbox.photos.length})</button>}
+        <button onClick={e=>{e.stopPropagation();closeLightbox();}} style={{width:38,height:38,borderRadius:8,border:"none",background:"rgba(255,255,255,.15)",color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(4px)",transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.15)"}>✕</button>
+      </div>
+      {multi&&<button onClick={e=>{e.stopPropagation();lbPrev();}} style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",border:"none",background:"rgba(255,255,255,.12)",color:"#fff",fontSize:22,cursor:"pointer",zIndex:10001,transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.12)"}>‹</button>}
+      {multi&&<button onClick={e=>{e.stopPropagation();lbNext();}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:44,height:44,borderRadius:"50%",border:"none",background:"rgba(255,255,255,.12)",color:"#fff",fontSize:22,cursor:"pointer",zIndex:10001,transition:"background .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,.3)"} onMouseLeave={e=>e.target.style.background="rgba(255,255,255,.12)"}>›</button>}
+      <div onClick={e=>e.stopPropagation()} style={{maxWidth:"90vw",maxHeight:"80vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <img src={p.data} style={{maxWidth:"90vw",maxHeight:"80vh",objectFit:"contain",borderRadius:8,boxShadow:"0 8px 40px rgba(0,0,0,.6)"}} alt={p.label||""}/>
+      </div>
+      <div style={{marginTop:12,textAlign:"center",zIndex:10001}}>
+        {p.label&&<div style={{color:"#fff",fontFamily:F,fontSize:13,fontWeight:600,marginBottom:4}}>{p.label}</div>}
+        {multi&&<div style={{color:"rgba(255,255,255,.5)",fontFamily:F,fontSize:12}}>{lightbox.index+1} / {lightbox.photos.length}</div>}
+      </div>
+    </div>);
+  };
+
+  // ========== EXPORT PDF ==========
+  const exportPDF=(r)=>{
+    const pmCode=r.pmCode||r.pm_code||"";
+    const pmAdresse=r.pmAdresse||r.pm_adresse||"";
+    const suiviTxt=r.suiviTxt||r.suivi_txt||"";
+    const nbCli=r.nbCli||r.nb_cli||0;
+    const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"}):"";
+    const etat=typeof r.etat==="string"?r.etat:"";
+
+    const photosHtml=(r.photos||[]).map((p,i)=>`
+      <div style="break-inside:avoid;text-align:center;margin-bottom:10px;">
+        <img src="${p.data}" style="max-width:100%;max-height:250px;object-fit:contain;border-radius:6px;border:1px solid #ddd;"/>
+        ${p.label?`<div style="font-size:10px;color:#666;margin-top:3px;">${p.label}</div>`:""}
+      </div>`).join("");
+
+    const html=`<!DOCTYPE html><html><head><meta charset="utf-8"/>
+    <title>CR-${r.id} ${pmCode}</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{font-family:'DM Sans',sans-serif;padding:30px;color:#1a1a2e;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #e63946;padding-bottom:12px;margin-bottom:20px;}
+      .logo{display:flex;align-items:center;gap:10px;}
+      .logo-circle{width:40px;height:40px;border-radius:50%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;}
+      .title{font-size:16px;font-weight:800;}
+      .subtitle{font-size:9px;color:#888;text-transform:uppercase;}
+      .meta{text-align:right;font-size:11px;}
+      .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#fafaf6;border-radius:8px;padding:14px;margin-bottom:16px;}
+      .info-grid .full{grid-column:1/-1;}
+      .label{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}
+      .value{font-size:12px;font-weight:700;}
+      .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;}
+      .badge-blue{background:#dbeafe;color:#1e40af;}
+      .badge-red{background:#fee2e2;color:#b91c1c;}
+      .badge-green{background:#dcfce7;color:#166534;}
+      .badge-orange{background:#ffedd5;color:#c2410c;}
+      .section{margin-bottom:14px;}
+      .section-title{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+      .content-box{background:#fafaf6;padding:10px;border-radius:6px;white-space:pre-wrap;font-size:11px;border-left:3px solid #e63946;}
+      .suivi{background:#fef3c7;border:1.5px solid #f59e0b;border-radius:6px;padding:10px;margin-bottom:14px;}
+      .suivi-title{font-size:10px;font-weight:800;color:#92400e;}
+      .suivi-text{font-size:11px;color:#78350f;}
+      .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}
+      .footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;font-size:9px;color:#999;text-align:center;}
+      @media print{body{padding:20px;}@page{size:A4;margin:15mm;}}
+    </style></head><body>
+    <div class="header">
+      <div class="logo"><div class="logo-circle">TS</div><div><div class="title">Compte Rendu</div><div class="subtitle">CR-${r.id}</div></div></div>
+      <div class="meta"><div style="font-weight:700;">${dateStr}</div>${r.h1?`<div style="color:#888;">${r.h1} → ${r.h2||"?"}</div>`:""}</div>
+    </div>
+    <div class="info-grid">
+      <div><div class="label">PM</div><div class="value" style="font-family:monospace;">${pmCode}</div></div>
+      <div><div class="label">Technicien</div><div class="value">${r.tech||"?"}</div></div>
+      <div class="full"><div class="label">Adresse</div><div style="font-size:11px;">${pmAdresse}</div></div>
+    </div>
+    <div class="section"><div class="section-title">Type d'intervention</div><div>${(r.types||[]).map(t=>`<span class="badge badge-blue">${t}</span> `).join("")}</div></div>
+    <div class="section"><div class="section-title">État</div><span class="badge ${etat.includes("Bon")?"badge-green":etat.includes("Critique")?"badge-red":"badge-orange"}">${etat||"N/A"}</span></div>
+    ${(r.probs||[]).length>0?`<div class="section"><div class="section-title">Problèmes identifiés</div><div>${r.probs.map(p=>`<span class="badge badge-red">${p}</span> `).join("")}</div></div>`:""}
+    ${r.actions?`<div class="section"><div class="section-title">Actions réalisées</div><div class="content-box">${r.actions}</div></div>`:""}
+    ${nbCli>0?`<div class="section"><div class="section-title">Clients rétablis</div><span class="badge badge-green">${nbCli}</span></div>`:""}
+    ${r.mesures?`<div class="section"><div class="section-title">Mesures optiques</div><div style="font-family:monospace;font-size:10px;background:#f1f5f9;padding:8px;border-radius:4px;white-space:pre-wrap;">${r.mesures}</div></div>`:""}
+    ${r.materiel?`<div class="section"><div class="section-title">Matériel utilisé</div><div style="font-size:11px;white-space:pre-wrap;">${r.materiel}</div></div>`:""}
+    ${r.obs?`<div class="section"><div class="section-title">Observations</div><div style="font-size:11px;font-style:italic;white-space:pre-wrap;">${r.obs}</div></div>`:""}
+    ${r.suivi?`<div class="suivi"><div class="suivi-title">⚠️ SUIVI NÉCESSAIRE</div><div class="suivi-text">${suiviTxt}</div></div>`:""}
+    ${(r.photos||[]).length>0?`<div class="section"><div class="section-title">📸 Photos (${r.photos.length})</div><div class="photos">${photosHtml}</div></div>`:""}
+    <div class="footer">VIE DE RÉSEAU — TechnoSmart · Généré le ${new Date().toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"})}</div>
+    </body></html>`;
+
+    const w=window.open("","_blank","width=800,height=900");
+    if(w){w.document.write(html);w.document.close();setTimeout(()=>{w.print();},600);}
+  };
+
   // ========== STYLES ==========
   const inp={width:"100%",padding:"9px 12px",borderRadius:6,border:`1.5px solid ${CL.bd}`,fontFamily:F,fontSize:14,outline:"none",background:"#fff",boxSizing:"border-box"};
   const b1={padding:"9px 20px",borderRadius:6,border:"none",background:CL.a,color:"#fff",fontFamily:F,fontSize:13,fontWeight:700,cursor:"pointer"};
@@ -430,7 +562,7 @@ export default function App(){
       <div style={crd}><h3 style={sT}>📸 Photos</h3>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhotos} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current?.click()} style={{...b1,background:"#fff",color:CL.a,border:`2px dashed ${CL.a}`,width:"100%",padding:14,marginBottom:10,fontSize:12}}>📷 Prendre / ajouter photos</button>
-        {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
+        {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} onClick={()=>openLightbox(form.photos,i)} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} title="Cliquer pour agrandir"/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginBottom:30}}>
         <button onClick={()=>setPg("dash")} style={b2}>Annuler</button>
@@ -450,8 +582,8 @@ export default function App(){
     const pmAdresse=r.pmAdresse||r.pm_adresse||"";
     const suiviTxt=r.suiviTxt||r.suivi_txt||"";
     const nbCli=r.nbCli||r.nb_cli||0;
-    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><button onClick={()=>setViewR(null)} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
-    <div style={{...crd,border:`2px solid ${CL.a}`}}>
+    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><div style={{display:"flex",gap:8,marginBottom:12}}><button onClick={()=>setViewR(null)} style={{...b2,fontSize:11}}>← Retour</button><button onClick={()=>exportPDF(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button></div>
+    <div ref={reportRef} style={{...crd,border:`2px solid ${CL.a}`}}>
       <div style={{display:"flex",justifyContent:"space-between",borderBottom:`2px solid ${CL.a}`,paddingBottom:10,marginBottom:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}><Logo/><div><div style={{fontFamily:F,fontWeight:800,fontSize:15}}>Compte Rendu</div><div style={{fontFamily:F,fontSize:9,color:CL.sb}}>CR-{r.id}</div></div></div>
         <div style={{textAlign:"right"}}><div style={{fontFamily:F,fontSize:12,fontWeight:700}}>{dateStr}</div>{r.h1&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{r.h1}→{r.h2||"?"}</div>}</div>
@@ -472,7 +604,7 @@ export default function App(){
       {r.materiel&&<div style={{marginBottom:10}}><div style={lbl}>Matériel</div><div style={{fontFamily:F,fontSize:11,whiteSpace:"pre-wrap"}}>{r.materiel}</div></div>}
       {r.obs&&<div style={{marginBottom:10}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:11,fontStyle:"italic",whiteSpace:"pre-wrap"}}>{r.obs}</div></div>}
       {r.suivi&&<div style={{background:"#fef3c7",border:"1.5px solid #f59e0b",borderRadius:6,padding:8,marginBottom:10}}><div style={{fontFamily:F,fontSize:10,fontWeight:800,color:"#92400e"}}>⚠️ SUIVI</div><div style={{fontFamily:F,fontSize:11,color:"#78350f"}}>{suiviTxt}</div></div>}
-      {r.photos?.length>0&&<div><div style={{...lbl,marginBottom:6}}>📸 Photos ({r.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{r.photos.map((p,i)=><div key={i} style={{borderRadius:4,overflow:"hidden",border:`1px solid ${CL.bd}`}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/>{p.label&&<div style={{padding:2,fontFamily:F,fontSize:9,color:CL.sb,textAlign:"center"}}>{p.label}</div>}</div>)}</div></div>}
+      {r.photos?.length>0&&<div><div style={{...lbl,marginBottom:6}}>📸 Photos ({r.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{r.photos.map((p,i)=><div key={i} onClick={()=>openLightbox(r.photos,i)} style={{borderRadius:4,overflow:"hidden",border:`1px solid ${CL.bd}`,cursor:"pointer",transition:"transform .15s,box-shadow .15s"}} onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.03)";e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,.15)";}} onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="none";}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/>{p.label&&<div style={{padding:2,fontFamily:F,fontSize:9,color:CL.sb,textAlign:"center"}}>{p.label}</div>}</div>)}</div></div>}
     </div></div>);
   };
 
@@ -591,5 +723,6 @@ export default function App(){
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
     {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="route"&&RoutePg()}
+    {Lightbox()}
   </div>);
 }
