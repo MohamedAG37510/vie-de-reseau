@@ -32,6 +32,7 @@ export default function App(){
   const [pg,setPg]=useState("dash");
   const [search,setSearch]=useState("");
   const [fDept,setFDept]=useState("all");
+  const [fIW,setFIW]=useState("all");
   const [selPM,setSelPM]=useState(null);
   const [form,setForm]=useState(null);
   const [viewR,setViewR]=useState(null);
@@ -40,6 +41,8 @@ export default function App(){
   const [impMsg,setImpMsg]=useState("");
   const [showAss,setShowAss]=useState(null);
   const [newMgrCode,setNewMgrCode]=useState("");
+  const [histSearch,setHistSearch]=useState("");
+  const [localCodes,setLocalCodes]=useState({});
   const fileRef=useRef(null);
   const impRef=useRef(null);
 
@@ -54,7 +57,7 @@ export default function App(){
         supabase.from("config").select("*"),
       ]);
       if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw})));
-      if(techData) setTechs(techData);
+      if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
       if(assData){const a={};assData.forEach(x=>a[x.pm_code]=x.tech_name);setAssigns(a);}
       if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
@@ -187,7 +190,12 @@ export default function App(){
 
   const depts=[...new Set(pms.map(p=>p.dept).filter(Boolean))].sort();
   const myPms=isT?pms.filter(pm=>assigns[pm.code]===tName):pms;
-  const filtered=myPms.filter(pm=>(pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase()))&&(fDept==="all"||pm.dept===fDept));
+  const filtered=myPms.filter(pm=>{
+    const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
+    const md=fDept==="all"||pm.dept===fDept;
+    const mi=fIW==="all"||(fIW==="10+"&&pm.nbIW>=10)||(fIW==="7-9"&&pm.nbIW>=7&&pm.nbIW<=9)||(fIW==="5-6"&&pm.nbIW>=5&&pm.nbIW<=6)||(fIW==="1-4"&&pm.nbIW>=1&&pm.nbIW<=4)||(fIW==="0"&&pm.nbIW===0);
+    return ms&&md&&mi;
+  });
   const myReps=isT?reps.filter(r=>r.tech===tName):reps;
   const repsFor=code=>myReps.filter(r=>r.pmCode===code);
 
@@ -277,7 +285,8 @@ export default function App(){
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <input placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:260,fontSize:13}}/>
-        <select value={fDept} onChange={e=>setFDept(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous</option>{depts.map(d=><option key={d} value={d}>{d}</option>)}</select>
+        <select value={fDept} onChange={e=>setFDept(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous depts</option>{depts.map(d=><option key={d} value={d}>{d}</option>)}</select>
+        <select value={fIW} onChange={e=>setFIW(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous IW</option><option value="10+">10+ (critique)</option><option value="7-9">7-9 (haute)</option><option value="5-6">5-6 (moyenne)</option><option value="1-4">1-4 (basse)</option><option value="0">0</option></select>
       </div>
       <div style={{...crd,padding:0,overflow:"hidden"}}>
         <div style={{display:"grid",gridTemplateColumns:isM?"2fr .5fr 2.5fr .6fr .7fr 1.4fr 1fr":"2.2fr .5fr 3fr .7fr .8fr 1fr",background:CL.dk,color:"#fff",fontFamily:F,fontSize:9,fontWeight:700,padding:"7px 10px",textTransform:"uppercase"}}>
@@ -355,58 +364,72 @@ export default function App(){
   const OkPg=()=>(<div style={{padding:20,maxWidth:400,margin:"50px auto",textAlign:"center"}}><div style={{fontSize:56}}>✅</div><h2 style={{fontFamily:F,color:CL.dk,fontSize:20,fontWeight:800,marginTop:12}}>CR enregistré !</h2><p style={{fontFamily:F,color:CL.sb,margin:"12px 0 20px"}}>PM: <strong>{form?.pmCode}</strong></p><div style={{display:"flex",gap:8,justifyContent:"center"}}><button onClick={()=>setPg("dash")} style={b2}>Dashboard</button><button onClick={()=>setPg("hist")} style={b1}>Voir CR</button></div></div>);
 
   // ========== VIEW REPORT ==========
-  const VR=({r})=>(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><button onClick={()=>setViewR(null)} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
+  const VR=({r})=>{
+    if(!r)return null;
+    const etat=typeof r.etat==="string"?r.etat:"";
+    const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"}):"";
+    const pmCode=r.pmCode||r.pm_code||"";
+    const pmAdresse=r.pmAdresse||r.pm_adresse||"";
+    const suiviTxt=r.suiviTxt||r.suivi_txt||"";
+    const nbCli=r.nbCli||r.nb_cli||0;
+    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><button onClick={()=>setViewR(null)} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
     <div style={{...crd,border:`2px solid ${CL.a}`}}>
       <div style={{display:"flex",justifyContent:"space-between",borderBottom:`2px solid ${CL.a}`,paddingBottom:10,marginBottom:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}><Logo/><div><div style={{fontFamily:F,fontWeight:800,fontSize:15}}>Compte Rendu</div><div style={{fontFamily:F,fontSize:9,color:CL.sb}}>CR-{r.id}</div></div></div>
-        <div style={{textAlign:"right"}}><div style={{fontFamily:F,fontSize:12,fontWeight:700}}>{new Date(r.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>{r.h1&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{r.h1}→{r.h2||"?"}</div>}</div>
+        <div style={{textAlign:"right"}}><div style={{fontFamily:F,fontSize:12,fontWeight:700}}>{dateStr}</div>{r.h1&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{r.h1}→{r.h2||"?"}</div>}</div>
       </div>
       <div style={{background:"#fafaf6",borderRadius:8,padding:10,marginBottom:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-        <div><span style={lbl}>PM</span><div style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{r.pmCode}</div></div>
-        <div><span style={lbl}>Tech</span><div style={{fontFamily:F,fontSize:12,fontWeight:700}}>{r.tech}</div></div>
-        <div style={{gridColumn:"1/-1"}}><span style={lbl}>Adresse</span><div style={{fontFamily:F,fontSize:11}}>{r.pmAdresse}</div></div>
+        <div><span style={lbl}>PM</span><div style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{pmCode}</div></div>
+        <div><span style={lbl}>Tech</span><div style={{fontFamily:F,fontSize:12,fontWeight:700}}>{r.tech||"?"}</div></div>
+        <div style={{gridColumn:"1/-1"}}><span style={lbl}>Adresse</span><div style={{fontFamily:F,fontSize:11}}>{pmAdresse}</div></div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-        <div><div style={{...lbl,marginBottom:3}}>Type</div><div style={{display:"flex",flexWrap:"wrap",gap:2}}>{r.types?.map(t=><B key={t} color="blue">{t}</B>)}</div></div>
-        <div><div style={{...lbl,marginBottom:3}}>État</div><B color={r.etat?.includes("Bon")?"green":r.etat?.includes("Critique")?"red":"orange"}>{r.etat}</B></div>
+        <div><div style={{...lbl,marginBottom:3}}>Type</div><div style={{display:"flex",flexWrap:"wrap",gap:2}}>{(r.types||[]).map(t=><B key={t} color="blue">{t}</B>)}</div></div>
+        <div><div style={{...lbl,marginBottom:3}}>État</div><B color={etat.includes("Bon")?"green":etat.includes("Critique")?"red":"orange"}>{etat||"N/A"}</B></div>
       </div>
       {r.probs?.length>0&&<div style={{marginBottom:12}}><div style={{...lbl,marginBottom:3}}>Problèmes</div><div style={{display:"flex",flexWrap:"wrap",gap:2}}>{r.probs.map(p=><B key={p} color="red">{p}</B>)}</div></div>}
-      <div style={{marginBottom:12}}><div style={{...lbl,marginBottom:3}}>Actions</div><div style={{fontFamily:F,fontSize:12,background:"#fafaf6",padding:8,borderRadius:6,whiteSpace:"pre-wrap",borderLeft:`3px solid ${CL.a}`}}>{r.actions}</div></div>
-      {r.nbCli>0&&<div style={{marginBottom:10}}><span style={lbl}>Clients: </span><B color="green">{r.nbCli}</B></div>}
+      {r.actions&&<div style={{marginBottom:12}}><div style={{...lbl,marginBottom:3}}>Actions</div><div style={{fontFamily:F,fontSize:12,background:"#fafaf6",padding:8,borderRadius:6,whiteSpace:"pre-wrap",borderLeft:`3px solid ${CL.a}`}}>{r.actions}</div></div>}
+      {nbCli>0&&<div style={{marginBottom:10}}><span style={lbl}>Clients: </span><B color="green">{nbCli}</B></div>}
       {r.mesures&&<div style={{marginBottom:10}}><div style={lbl}>Mesures</div><div style={{fontFamily:"monospace",fontSize:10,background:"#f1f5f9",padding:6,borderRadius:4,whiteSpace:"pre-wrap"}}>{r.mesures}</div></div>}
       {r.materiel&&<div style={{marginBottom:10}}><div style={lbl}>Matériel</div><div style={{fontFamily:F,fontSize:11,whiteSpace:"pre-wrap"}}>{r.materiel}</div></div>}
       {r.obs&&<div style={{marginBottom:10}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:11,fontStyle:"italic",whiteSpace:"pre-wrap"}}>{r.obs}</div></div>}
-      {r.suivi&&<div style={{background:"#fef3c7",border:"1.5px solid #f59e0b",borderRadius:6,padding:8,marginBottom:10}}><div style={{fontFamily:F,fontSize:10,fontWeight:800,color:"#92400e"}}>⚠️ SUIVI</div><div style={{fontFamily:F,fontSize:11,color:"#78350f"}}>{r.suiviTxt}</div></div>}
+      {r.suivi&&<div style={{background:"#fef3c7",border:"1.5px solid #f59e0b",borderRadius:6,padding:8,marginBottom:10}}><div style={{fontFamily:F,fontSize:10,fontWeight:800,color:"#92400e"}}>⚠️ SUIVI</div><div style={{fontFamily:F,fontSize:11,color:"#78350f"}}>{suiviTxt}</div></div>}
       {r.photos?.length>0&&<div><div style={{...lbl,marginBottom:6}}>📸 Photos ({r.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{r.photos.map((p,i)=><div key={i} style={{borderRadius:4,overflow:"hidden",border:`1px solid ${CL.bd}`}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block"}}/>{p.label&&<div style={{padding:2,fontFamily:F,fontSize:9,color:CL.sb,textAlign:"center"}}>{p.label}</div>}</div>)}</div></div>}
     </div></div>);
+  };
 
   // ========== HISTORIQUE ==========
   const Hist=()=>{
-    const [hs,setHs]=useState(search||"");
-    const fl=myReps.filter(r=>r.pmCode?.toLowerCase().includes(hs.toLowerCase())||r.tech?.toLowerCase().includes(hs.toLowerCase()));
-    if(viewR)return <VR r={viewR}/>;
+    const fl=myReps.filter(r=>{
+      if(!histSearch)return true;
+      const s=histSearch.toLowerCase();
+      return (r.pmCode||r.pm_code||"").toLowerCase().includes(s)||(r.tech||"").toLowerCase().includes(s);
+    });
+    if(viewR)return VR({r:viewR});
     return(<div style={{padding:16}}>
       <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:12}}>{isT?"Mes CR":"Tous les CR"}</h2>
-      <input placeholder="🔍 Rechercher..." value={hs} onChange={e=>setHs(e.target.value)} style={{...inp,maxWidth:340,marginBottom:12,fontSize:13}}/>
+      <input placeholder="🔍 Rechercher..." value={histSearch} onChange={e=>setHistSearch(e.target.value)} style={{...inp,maxWidth:340,marginBottom:12,fontSize:13}}/>
       {fl.length===0?<div style={{textAlign:"center",padding:40,color:CL.sb,fontFamily:F}}>📭 Aucun CR.</div>:
-        fl.map(r=><div key={r.id} style={{...crd,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setViewR(r)}>
+        fl.map(r=>{
+          const etat=typeof r.etat==="string"?r.etat:"";
+          const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR"):"";
+          return(<div key={r.id} style={{...crd,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setViewR(r)}>
           <div style={{flex:1}}>
             <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
-              <span style={{fontFamily:F,fontWeight:800,fontSize:12}}>{r.pmCode}</span>
-              <B color={r.etat?.includes("Bon")?"green":r.etat?.includes("Critique")?"red":"orange"}>{r.etat}</B>
+              <span style={{fontFamily:F,fontWeight:800,fontSize:12}}>{r.pmCode||r.pm_code}</span>
+              <B color={etat.includes("Bon")?"green":etat.includes("Critique")?"red":"orange"}>{etat||"N/A"}</B>
               {r.suivi&&<B color="orange">⚠️</B>}
               {r.photos?.length>0&&<B color="gray">📸{r.photos.length}</B>}
             </div>
-            <div style={{fontFamily:F,fontSize:10,color:CL.sb}}>👷 {r.tech} · {new Date(r.date).toLocaleDateString("fr-FR")}</div>
+            <div style={{fontFamily:F,fontSize:10,color:CL.sb}}>👷 {r.tech||"?"} · {dateStr}</div>
           </div>
           {isM&&<button onClick={e=>{e.stopPropagation();delR(r.id);}} style={{...b2,padding:"3px 6px",fontSize:9,color:"#dc2626"}}>🗑️</button>}
-        </div>)}
+        </div>);})}
     </div>);
   };
 
   // ========== TEAM ==========
   const Team=()=>{
-    const [localCodes,setLocalCodes]=useState(()=>{const o={};techs.forEach(t=>{o[t.name]=t.code||""});return o;});
     const handleCodeChange=(name,val)=>{setLocalCodes(prev=>({...prev,[name]:val}));};
     const handleCodeBlur=(name)=>{const code=localCodes[name]||"";updateTechCode(name,code);};
     return(<div style={{padding:16,maxWidth:520}}>
@@ -416,7 +439,7 @@ export default function App(){
         <div style={{flex:1}}><div style={{fontFamily:F,fontSize:13,fontWeight:700}}>{t.name}</div><div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{na} PM · {nc} CR</div></div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>Code:</span>
-          <input value={localCodes[t.name]||""} onChange={e=>handleCodeChange(t.name,e.target.value)} onBlur={()=>handleCodeBlur(t.name)} placeholder="----" style={{...inp,width:65,fontSize:12,padding:"3px 5px",textAlign:"center",letterSpacing:2,fontFamily:"monospace"}}/>
+          <input value={localCodes[t.name]??t.code??""} onChange={e=>handleCodeChange(t.name,e.target.value)} onBlur={()=>handleCodeBlur(t.name)} placeholder="----" style={{...inp,width:65,fontSize:12,padding:"3px 5px",textAlign:"center",letterSpacing:2,fontFamily:"monospace"}}/>
           <button onClick={()=>removeTech(t.name)} style={{...b2,padding:"2px 5px",fontSize:9,color:"#dc2626"}}>✕</button>
         </div>
       </div>);})}</div>
