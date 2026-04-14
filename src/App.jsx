@@ -42,6 +42,8 @@ export default function App(){
   const [showAss,setShowAss]=useState(null);
   const [newMgrCode,setNewMgrCode]=useState("");
   const [histSearch,setHistSearch]=useState("");
+  const [histDateFrom,setHistDateFrom]=useState("");
+  const [histDateTo,setHistDateTo]=useState("");
   const [localCodes,setLocalCodes]=useState({});
   const [iwItems,setIwItems]=useState([]);
   const [showIWPanel,setShowIWPanel]=useState(null); // pm code or null
@@ -654,18 +656,39 @@ export default function App(){
   // ========== HISTORIQUE ==========
   const Hist=()=>{
     const fl=myReps.filter(r=>{
-      if(!histSearch)return true;
       const s=histSearch.toLowerCase();
-      return (r.pmCode||r.pm_code||"").toLowerCase().includes(s)||(r.tech||"").toLowerCase().includes(s);
+      const matchSearch=!histSearch||(r.pmCode||r.pm_code||"").toLowerCase().includes(s)||(r.tech||"").toLowerCase().includes(s);
+      const rDate=r.date||"";
+      const matchFrom=!histDateFrom||rDate>=histDateFrom;
+      const matchTo=!histDateTo||rDate<=histDateTo;
+      return matchSearch&&matchFrom&&matchTo;
     });
+    const totalCli=fl.reduce((s,r)=>(r.nbCli||r.nb_cli||0)+s,0);
+    const totalIW=fl.reduce((s,r)=>(r.iw_results||r.iwResults||[]).length+s,0);
+    const totalIWDone=fl.reduce((s,r)=>(r.iw_results||r.iwResults||[]).filter(i=>i.status==="Fait").length+s,0);
+
     if(viewR)return VR({r:viewR});
     return(<div style={{padding:16}}>
       <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:12}}>{isT?"Mes CR":"Tous les CR"}</h2>
-      <input placeholder="🔍 Rechercher..." value={histSearch} onChange={e=>setHistSearch(e.target.value)} style={{...inp,maxWidth:340,marginBottom:12,fontSize:13}}/>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+        <input placeholder="🔍 PM, tech..." value={histSearch} onChange={e=>setHistSearch(e.target.value)} style={{...inp,maxWidth:200,fontSize:12}}/>
+        <div><label style={{...lbl,marginBottom:2}}>Du</label><input type="date" value={histDateFrom} onChange={e=>setHistDateFrom(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
+        <div><label style={{...lbl,marginBottom:2}}>Au</label><input type="date" value={histDateTo} onChange={e=>setHistDateTo(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
+        {(histDateFrom||histDateTo)&&<button onClick={()=>{setHistDateFrom("");setHistDateTo("");}} style={{...b2,padding:"6px 10px",fontSize:10}}>✕ Reset</button>}
+      </div>
+      {fl.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        <div style={{...crd,padding:8,marginBottom:0,borderLeft:"4px solid #2563eb",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>📝</span><div><div style={{fontSize:16,fontWeight:800,fontFamily:F}}>{fl.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>CR</div></div></div>
+        <div style={{...crd,padding:8,marginBottom:0,borderLeft:"4px solid #059669",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>👥</span><div><div style={{fontSize:16,fontWeight:800,fontFamily:F}}>{totalCli}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Clients</div></div></div>
+        <div style={{...crd,padding:8,marginBottom:0,borderLeft:"4px solid #7c3aed",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>📋</span><div><div style={{fontSize:16,fontWeight:800,fontFamily:F}}>{totalIW}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>IW total</div></div></div>
+        <div style={{...crd,padding:8,marginBottom:0,borderLeft:"4px solid #059669",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>✅</span><div><div style={{fontSize:16,fontWeight:800,fontFamily:F}}>{totalIWDone}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>IW faits</div></div></div>
+      </div>}
       {fl.length===0?<div style={{textAlign:"center",padding:40,color:CL.sb,fontFamily:F}}>📭 Aucun CR.</div>:
         fl.map(r=>{
           const etat=typeof r.etat==="string"?r.etat:"";
           const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR"):"";
+          const nbCli=r.nbCli||r.nb_cli||0;
+          const iwRes=r.iw_results||r.iwResults||[];
+          const iwDone=iwRes.filter(i=>i.status==="Fait").length;
           return(<div key={r.id} style={{...crd,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setViewR(r)}>
           <div style={{flex:1}}>
             <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
@@ -673,8 +696,11 @@ export default function App(){
               <B color={etat.includes("Bon")?"green":etat.includes("Critique")?"red":"orange"}>{etat||"N/A"}</B>
               {r.suivi&&<B color="orange">⚠️</B>}
               {r.photos?.length>0&&<B color="gray">📸{r.photos.length}</B>}
+              {nbCli>0&&<B color="green">👥 {nbCli}</B>}
+              {iwRes.length>0&&<B color={iwDone===iwRes.length?"green":"purple"}>📋 {iwDone}/{iwRes.length}</B>}
             </div>
             <div style={{fontFamily:F,fontSize:10,color:CL.sb}}>👷 {r.tech||"?"} · {dateStr}</div>
+            {iwRes.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:4}}>{iwRes.map((iw,j)=><span key={j} style={{fontFamily:"monospace",fontSize:8,padding:"1px 5px",borderRadius:8,background:iw.status==="Fait"?"#dcfce7":iw.status==="Pas fait"?"#fee2e2":iw.status==="Impossible"?"#f3e8ff":"#f1f5f9",color:iw.status==="Fait"?"#059669":iw.status==="Pas fait"?"#dc2626":iw.status==="Impossible"?"#7c3aed":"#999",fontWeight:700}}>{iw.ref_iw} {iw.status==="Fait"?"✓":iw.status==="Pas fait"?"✗":iw.status==="Impossible"?"—":""}</span>)}</div>}
           </div>
           {isM&&<button onClick={e=>{e.stopPropagation();delR(r.id);}} style={{...b2,padding:"3px 6px",fontSize:9,color:"#dc2626"}}>🗑️</button>}
         </div>);})}
