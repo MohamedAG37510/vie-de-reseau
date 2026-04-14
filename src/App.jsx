@@ -44,6 +44,7 @@ export default function App(){
   const [histSearch,setHistSearch]=useState("");
   const [histDateFrom,setHistDateFrom]=useState("");
   const [histDateTo,setHistDateTo]=useState("");
+  const [resolvedSearch,setResolvedSearch]=useState("");
   const [localCodes,setLocalCodes]=useState({});
   const [iwItems,setIwItems]=useState([]);
   const [showIWPanel,setShowIWPanel]=useState(null); // pm code or null
@@ -68,7 +69,7 @@ export default function App(){
         supabase.from("config").select("*"),
         supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
       ]);
-      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng})));
+      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
       if(assData){const a={};assData.forEach(x=>a[x.pm_code]=x.tech_name);setAssigns(a);}
@@ -177,6 +178,12 @@ export default function App(){
   const startEditIW=(iw)=>{setIwEditId(iw.id);setIwForm({ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire:iw.commentaire||""});};
   const cancelEditIW=()=>{setIwEditId(null);setIwForm({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});};
 
+  // ========== REACTIVATE PM ==========
+  const reactivatePM=async(code)=>{
+    await supabase.from("pms").update({resolved:false,resolved_at:null}).eq("code",code);
+    await loadAll();
+  };
+
   // ========== DELETE PMS ==========
   const resetPms=async()=>{
     await supabase.from("assignments").delete().neq("pm_code","");
@@ -248,11 +255,24 @@ export default function App(){
         if(i%5===4)await new Promise(r=>setTimeout(r,150));
       }
 
-      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng}));
+      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng,resolved:false,resolved_at:null}));
       const{error}=await supabase.from("pms").upsert(rows,{onConflict:"code"});
       if(error){setImpMsg("Erreur: "+error.message);setGeoProgress("");return;}
+
+      // Mark PMs absent from new import as resolved
+      const importedCodes=new Set(np.map(p=>p.code));
+      const activePmsBefore=pms.filter(p=>!p.resolved);
+      const toResolve=activePmsBefore.filter(p=>!importedCodes.has(p.code));
+      let resolvedCount=0;
+      if(toResolve.length>0){
+        const now=new Date().toISOString();
+        const resCodes=toResolve.map(p=>p.code);
+        await supabase.from("pms").update({resolved:true,resolved_at:now}).in("code",resCodes);
+        resolvedCount=toResolve.length;
+      }
+
       const geocoded=geoResults.filter(p=>p.lat).length;
-      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés`);
+      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés${resolvedCount>0?` · ${resolvedCount} PM résolus`:""}`);
       setGeoProgress("");
       await loadAll();
     };
@@ -290,7 +310,7 @@ export default function App(){
   const [routeData,setRouteData]=useState([]);
 
   const calcRoute=(techName)=>{
-    const techPms=pms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
+    const techPms=activePms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
     const optimized=optimizeRoute(techPms);
     let totalDist=0;
     const data=optimized.map((p,i)=>{
@@ -302,8 +322,10 @@ export default function App(){
     setRouteData(data);setShowRoute(true);
   };
 
-  const depts=[...new Set(pms.map(p=>p.dept).filter(Boolean))].sort();
-  const myPms=isT?pms.filter(pm=>assigns[pm.code]===tName):pms;
+  const activePms=pms.filter(p=>!p.resolved);
+  const resolvedPms=pms.filter(p=>p.resolved);
+  const depts=[...new Set(activePms.map(p=>p.dept).filter(Boolean))].sort();
+  const myPms=isT?activePms.filter(pm=>assigns[pm.code]===tName):activePms;
   const filtered=myPms.filter(pm=>{
     const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
     const md=fDept==="all"||pm.dept===fDept;
@@ -431,6 +453,7 @@ export default function App(){
         <button onClick={()=>{setPg("hist");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="hist"?CL.a:"rgba(255,255,255,.06)",color:pg==="hist"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 CR</button>
         <button onClick={()=>{setPg("route");setShowRoute(false);}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="route"?CL.a:"rgba(255,255,255,.06)",color:pg==="route"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Tournée</button>
         {isM&&<button onClick={()=>{setPg("team");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="team"?CL.a:"rgba(255,255,255,.06)",color:pg==="team"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>👷 Équipe</button>}
+        {isM&&<button onClick={()=>{setPg("resolved");setResolvedSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="resolved"?CL.a:"rgba(255,255,255,.06)",color:pg==="resolved"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>✅ Résolus{resolvedPms.length>0?` (${resolvedPms.length})`:""}</button>}
         <button onClick={()=>setUser(null)} style={{padding:"5px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",background:"transparent",color:"#fca5a5",fontFamily:F,fontSize:9,fontWeight:700,cursor:"pointer",marginLeft:4}}>⏏</button>
       </div>
     </div>
@@ -446,22 +469,22 @@ export default function App(){
       {geoProgress&&<div style={{marginTop:8,padding:8,borderRadius:6,background:"#dbeafe",fontFamily:F,fontSize:12,fontWeight:600,color:"#1e40af"}}>{geoProgress}</div>}
     </div>
     <div style={crd}>
-      <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{pms.length}</strong> PM · <strong>{depts.length}</strong> depts</div>
+      <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{activePms.length}</strong> PM actifs · <strong>{resolvedPms.length}</strong> résolus · <strong>{depts.length}</strong> depts</div>
       {pms.length>0&&<button onClick={resetPms} style={{...b2,marginTop:10,fontSize:11,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Réinitialiser</button>}
     </div>
   </div>);
 
   // ========== DASHBOARD ==========
   const Dash=()=>{
-    const aff=Object.keys(assigns).length;
-    const stats=isM?[{l:"PM",v:pms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:pms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"CR",v:reps.length,i:"📝",c:"#059669"},{l:"Affectés",v:aff,i:"✅",c:"#7c3aed"},{l:"Non aff.",v:pms.length-aff,i:"⚠️",c:pms.length-aff>0?"#dc2626":"#059669"}]
+    const aff=Object.keys(assigns).filter(c=>activePms.some(p=>p.code===c)).length;
+    const stats=isM?[{l:"PM actifs",v:activePms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:activePms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"CR",v:reps.length,i:"📝",c:"#059669"},{l:"Affectés",v:aff,i:"✅",c:"#7c3aed"},{l:"Non aff.",v:activePms.length-aff,i:"⚠️",c:activePms.length-aff>0?"#dc2626":"#059669"},{l:"Résolus",v:resolvedPms.length,i:"✅",c:"#059669",click:()=>setPg("resolved")}]
     :[{l:"Mes PM",v:myPms.length,i:"🏗️",c:"#2563eb"},{l:"IW",v:myPms.reduce((s,p)=>s+p.nbIW,0),i:"🔧",c:CL.a},{l:"Mes CR",v:myReps.length,i:"📝",c:"#059669"}];
     return(<div style={{padding:16}}>
       {myPms.length===0?(
         <div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>{isM?"📥":"📭"}</div><h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginTop:12}}>{isM?"Aucun PM":"Aucun PM affecté"}</h2><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>{isM?"Importez votre fichier.":"Contactez votre manager."}</p>{isM&&<button onClick={()=>setPg("import")} style={{...b1,marginTop:16}}>📥 Importer</button>}</div>
       ):(<>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,5)},1fr)`,gap:8,marginBottom:16}}>
-        {stats.map((s,i)=>(<div key={i} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,6)},1fr)`,gap:8,marginBottom:16}}>
+        {stats.map((s,i)=>(<div key={i} onClick={s.click||undefined} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0,cursor:s.click?"pointer":"default"}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <input placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:260,fontSize:13}}/>
@@ -733,6 +756,61 @@ export default function App(){
   </div>);
   };
 
+  // ========== RESOLVED PMs (Manager only) ==========
+  const ResolvedPg=()=>{
+    const fl=resolvedPms.filter(p=>{
+      if(!resolvedSearch)return true;
+      const s=resolvedSearch.toLowerCase();
+      return p.code.toLowerCase().includes(s)||p.adresse.toLowerCase().includes(s)||(assigns[p.code]||"").toLowerCase().includes(s);
+    });
+    const resDepts=[...new Set(resolvedPms.map(p=>p.dept).filter(Boolean))].sort();
+
+    if(viewR)return VR({r:viewR});
+
+    return(<div style={{padding:16}}>
+      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:4}}>✅ PM Résolus</h2>
+      <p style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:14}}>PM absents du dernier import — considérés comme traités.</p>
+
+      {resolvedPms.length===0?
+        <div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>🎉</div><h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginTop:12}}>Aucun PM résolu</h3><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>Les PM absents du prochain import apparaîtront ici.</p></div>
+      :<>
+        <input placeholder="🔍 Rechercher code, adresse, tech..." value={resolvedSearch} onChange={e=>setResolvedSearch(e.target.value)} style={{...inp,maxWidth:400,marginBottom:14,fontSize:13}}/>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
+          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #059669",marginBottom:0}}><span style={{fontSize:20}}>✅</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resolvedPms.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Résolus</div></div></div>
+          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #2563eb",marginBottom:0}}><span style={{fontSize:20}}>📝</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resolvedPms.reduce((s,p)=>reps.filter(r=>(r.pmCode||r.pm_code)===p.code).length+s,0)}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>CR associés</div></div></div>
+          <div style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:"4px solid #7c3aed",marginBottom:0}}><span style={{fontSize:20}}>🏢</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{resDepts.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>Depts</div></div></div>
+        </div>
+
+        <div style={{...crd,padding:0,overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",background:"#059669",color:"#fff",fontFamily:F,fontSize:9,fontWeight:700,padding:"7px 10px",textTransform:"uppercase"}}>
+            <div>Code</div><div>Dpt</div><div>Adresse</div><div style={{textAlign:"center"}}>CR</div><div style={{textAlign:"center"}}>Résolu le</div><div style={{textAlign:"center"}}>Actions</div>
+          </div>
+          <div style={{maxHeight:450,overflowY:"auto"}}>
+            {fl.map((pm,i)=>{
+              const pmReps=reps.filter(r=>(r.pmCode||r.pm_code)===pm.code);
+              const resDate=pm.resolved_at?new Date(pm.resolved_at).toLocaleDateString("fr-FR"):"—";
+              return(<div key={pm.code} style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",padding:"8px 10px",fontFamily:F,fontSize:11,background:i%2===0?"#fff":"#f0fdf4",borderBottom:`1px solid ${CL.bd}`,alignItems:"center"}}>
+                <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}</div>
+                <div style={{color:CL.sb,fontSize:10}}>{pm.dept}</div>
+                <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
+                <div style={{textAlign:"center"}}>
+                  {pmReps.length>0?<button onClick={()=>{setPg("hist");setHistSearch(pm.code);}} style={{...b2,padding:"2px 7px",fontSize:9,color:"#059669",borderColor:"#86efac"}}>📋 {pmReps.length}</button>
+                  :<span style={{fontFamily:F,fontSize:10,color:CL.sb}}>—</span>}
+                </div>
+                <div style={{textAlign:"center",fontFamily:F,fontSize:9,color:CL.sb}}>{resDate}</div>
+                <div style={{textAlign:"center"}}>
+                  <button onClick={()=>reactivatePM(pm.code)} style={{...b2,padding:"3px 8px",fontSize:9,color:"#2563eb",borderColor:"#93c5fd"}} title="Réactiver ce PM">🔄 Réactiver</button>
+                </div>
+              </div>);
+            })}
+          </div>
+        </div>
+        {fl.length===0&&resolvedSearch&&<div style={{textAlign:"center",padding:30,color:CL.sb,fontFamily:F}}>Aucun PM résolu correspondant.</div>}
+      </>}
+    </div>);
+  };
+
   // ========== ROUTE / TOURNÉE ==========
   const RoutePg=()=>{
     const techsWithPms=isM?[...new Set(Object.values(assigns))]:[];
@@ -746,7 +824,7 @@ export default function App(){
       {isM&&<div style={{...crd}}>
         <h3 style={sT}>Calculer une tournée</h3>
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {techsWithPms.map(t=>{const n=pms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
+          {techsWithPms.map(t=>{const n=activePms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
             <button key={t} onClick={()=>calcRoute(t)} style={{...b1,padding:"8px 14px",fontSize:12}}>{t} ({n} PM)</button>
           );})}
         </div>
@@ -791,7 +869,7 @@ export default function App(){
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="route"&&RoutePg()}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="route"&&RoutePg()}
     {Lightbox()}
   </div>);
 }
