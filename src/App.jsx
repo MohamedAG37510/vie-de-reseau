@@ -40,6 +40,7 @@ export default function App(){
   const [showAddT,setShowAddT]=useState(false);
   const [impMsg,setImpMsg]=useState("");
   const [showAss,setShowAss]=useState(null);
+  const [assTypes,setAssTypes]=useState([]);
   const [newMgrCode,setNewMgrCode]=useState("");
   const [histSearch,setHistSearch]=useState("");
   const [histDateFrom,setHistDateFrom]=useState("");
@@ -73,7 +74,7 @@ export default function App(){
       if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
-      if(assData){const a={};assData.forEach(x=>a[x.pm_code]=x.tech_name);setAssigns(a);}
+      if(assData){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
       if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
       if(iwData) setIwItems(iwData);
     }catch(e){console.error("Load error:",e);}
@@ -147,11 +148,15 @@ export default function App(){
     setTechs(prev=>prev.map(t=>t.name===name?{...t,code}:t));
   };
 
-  const assignTech=async(pmCode,techName)=>{
-    if(!techName){await supabase.from("assignments").delete().eq("pm_code",pmCode);}
-    else{await supabase.from("assignments").upsert({pm_code:pmCode,tech_name:techName},{onConflict:"pm_code"});}
-    const na={...assigns};if(!techName)delete na[pmCode];else na[pmCode]=techName;
-    setAssigns(na);setShowAss(null);
+  const assignTech=async(pmCode,techName,types)=>{
+    if(!techName){await supabase.from("assignments").delete().eq("pm_code",pmCode);const na={...assigns};delete na[pmCode];setAssigns(na);}
+    else{const t=types||assigns[pmCode]?.types||[];await supabase.from("assignments").upsert({pm_code:pmCode,tech_name:techName,types:t},{onConflict:"pm_code"});const na={...assigns};na[pmCode]={tech:techName,types:t};setAssigns(na);}
+    setShowAss(null);
+  };
+
+  const saveAssTypes=async(pmCode,types)=>{
+    await supabase.from("assignments").update({types}).eq("pm_code",pmCode);
+    setAssigns(prev=>({...prev,[pmCode]:{...prev[pmCode],types}}));
   };
 
   const saveMgrCode=async(code)=>{
@@ -317,7 +322,7 @@ export default function App(){
   const [routeData,setRouteData]=useState([]);
 
   const calcRoute=(techName)=>{
-    const techPms=activePms.filter(p=>assigns[p.code]===techName&&p.lat&&p.lng);
+    const techPms=activePms.filter(p=>assigns[p.code]?.tech===techName&&p.lat&&p.lng);
     const optimized=optimizeRoute(techPms);
     let totalDist=0;
     const data=optimized.map((p,i)=>{
@@ -332,7 +337,7 @@ export default function App(){
   const activePms=pms.filter(p=>!p.resolved);
   const resolvedPms=pms.filter(p=>p.resolved);
   const depts=[...new Set(activePms.map(p=>p.dept).filter(Boolean))].sort();
-  const myPms=isT?activePms.filter(pm=>assigns[pm.code]===tName):activePms;
+  const myPms=isT?activePms.filter(pm=>assigns[pm.code]?.tech===tName):activePms;
   const filtered=myPms.filter(pm=>{
     const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
     const md=fDept==="all"||pm.dept===fDept;
@@ -345,7 +350,9 @@ export default function App(){
   const startCR=pm=>{
     const pmIws=iwForPM(pm.code);
     const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:""}));
-    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
+    const assInfo=assigns[pm.code]||{};
+    const assignedTypes=assInfo.types||[];
+    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
   };
   const startEditCR=(r)=>{
     const pmCode=r.pmCode||r.pm_code||"";const pmAdresse=r.pmAdresse||r.pm_adresse||"";const pmDept=r.pmDept||r.pm_dept||"";
@@ -525,7 +532,7 @@ export default function App(){
             <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
             <div style={{textAlign:"center",fontWeight:800,color:pm.nbIW>=10?"#dc2626":CL.dk,fontSize:12}}>{pm.nbIW}</div>
             <div style={{textAlign:"center"}}><B color={pC(pm.nbIW)}>{pL(pm.nbIW)}</B></div>
-            {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?<><B color="purple">{assigns[pm.code]}</B><button onClick={()=>setShowAss(pm.code)} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>setShowAss(pm.code)} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
+            {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?.tech?<><B color="purple">{assigns[pm.code].tech}</B><button onClick={()=>{setShowAss(pm.code);setAssTypes(assigns[pm.code]?.types||[]);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>{setShowAss(pm.code);setAssTypes([]);}} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
             <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
               <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9}}>+CR</button>
               {isM&&<button onClick={()=>{setShowIWPanel(pm.code);setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);}} style={{...b2,padding:"2px 5px",fontSize:8,color:iwForPM(pm.code).length>0?"#059669":"#7c3aed",borderColor:iwForPM(pm.code).length>0?"#86efac":"#c4b5fd"}}>{iwForPM(pm.code).length>0?`📋${iwForPM(pm.code).length}`:"📋+"}</button>}
@@ -536,12 +543,19 @@ export default function App(){
           </div>))}
         </div>
       </div></>)}
-      {showAss&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowAss(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:320}} onClick={e=>e.stopPropagation()}>
+      {showAss&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowAss(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:400,maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
         <h3 style={{fontFamily:F,color:CL.dk,fontSize:14,fontWeight:800,marginBottom:12}}>Affecter — {showAss}</h3>
-        <div style={{display:"flex",flexDirection:"column",gap:5}}>
-          {techs.map(t=><button key={t.name} onClick={()=>assignTech(showAss,t.name)} style={{...b2,width:"100%",textAlign:"left",padding:"8px 12px",fontSize:13,fontWeight:assigns[showAss]===t.name?800:500,background:assigns[showAss]===t.name?"#f3e8ff":"#fff"}}>👷 {t.name}{assigns[showAss]===t.name?" ✓":""}</button>)}
+        <div style={{marginBottom:14}}>
+          <div style={lbl}>Technicien</div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {techs.map(t=><button key={t.name} onClick={()=>assignTech(showAss,t.name,assTypes)} style={{...b2,width:"100%",textAlign:"left",padding:"8px 12px",fontSize:13,fontWeight:assigns[showAss]?.tech===t.name?800:500,background:assigns[showAss]?.tech===t.name?"#f3e8ff":"#fff"}}>👷 {t.name}{assigns[showAss]?.tech===t.name?" ✓":""}</button>)}
+          </div>
         </div>
-        {assigns[showAss]&&<button onClick={()=>assignTech(showAss,null)} style={{...b2,width:"100%",marginTop:8,fontSize:11,color:"#dc2626"}}>Retirer</button>}
+        <div style={{marginBottom:14}}>
+          <div style={lbl}>Type d'intervention *</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=><button key={t} onClick={()=>{const nt=assTypes.includes(t)?assTypes.filter(x=>x!==t):[...assTypes,t];setAssTypes(nt);if(assigns[showAss]?.tech)saveAssTypes(showAss,nt);}} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${assTypes.includes(t)?CL.a:CL.bd}`,background:assTypes.includes(t)?"#fef2f2":"#fff",color:assTypes.includes(t)?CL.a:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{assTypes.includes(t)?"✓ ":""}{t}</button>)}</div>
+        </div>
+        {assigns[showAss]?.tech&&<button onClick={()=>assignTech(showAss,null)} style={{...b2,width:"100%",marginTop:4,fontSize:11,color:"#dc2626"}}>Retirer l'affectation</button>}
         <button onClick={()=>setShowAss(null)} style={{...b2,width:"100%",marginTop:6}}>Fermer</button>
       </div></div>)}
       {showIWPanel&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowIWPanel(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:440,maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
@@ -607,7 +621,8 @@ export default function App(){
         {isEdit?<div style={{marginBottom:12}}><label style={lbl}>Technicien (verrouillé)</label><div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.tech}</div></div>
         :isM?<div style={{marginBottom:12}}><label style={lbl}>Technicien *</label><select value={form.tech} onChange={e=>setForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">--</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>
         :<div style={{marginBottom:12}}><label style={lbl}>Technicien</label><div style={{...inp,background:"#f4f3ef",fontWeight:700}}>{tName}</div></div>}
-        <div style={{marginBottom:12}}><label style={lbl}>Type *</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=><button key={t} onClick={()=>toggleArr("types",t)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.types.includes(t)?CL.a:CL.bd}`,background:form.types.includes(t)?"#fef2f2":"#fff",color:form.types.includes(t)?CL.a:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.types.includes(t)?"✓ ":""}{t}</button>)}</div></div>
+        {isT&&!isEdit?<div style={{marginBottom:12}}><label style={lbl}>Type (défini par le manager)</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{form.types.length>0?form.types.map(t=><B key={t} color="blue">{t}</B>):<span style={{fontFamily:F,fontSize:11,color:CL.sb,fontStyle:"italic"}}>Aucun type défini</span>}</div></div>
+        :<div style={{marginBottom:12}}><label style={lbl}>Type *</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=><button key={t} onClick={()=>toggleArr("types",t)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.types.includes(t)?CL.a:CL.bd}`,background:form.types.includes(t)?"#fef2f2":"#fff",color:form.types.includes(t)?CL.a:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.types.includes(t)?"✓ ":""}{t}</button>)}</div></div>}
         <div style={{marginBottom:12}}><label style={lbl}>Problèmes</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{PROBS.map(p=><button key={p} onClick={()=>toggleArr("probs",p)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.probs.includes(p)?"#dc2626":CL.bd}`,background:form.probs.includes(p)?"#fef2f2":"#fff",color:form.probs.includes(p)?"#dc2626":CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.probs.includes(p)?"✓ ":""}{p}</button>)}</div></div>
         <div style={{marginBottom:12}}><label style={lbl}>État *</label><select value={form.etat} onChange={e=>setForm(f=>({...f,etat:e.target.value}))} style={inp}><option value="">--</option>{ETATS.map(e=><option key={e} value={e}>{e}</option>)}</select></div>
         <div><label style={lbl}>Clients rétablis</label><input type="number" min="0" value={form.nbCli} onChange={e=>setForm(f=>({...f,nbCli:parseInt(e.target.value)||0}))} style={{...inp,maxWidth:90}}/></div>
@@ -762,7 +777,7 @@ export default function App(){
     const handleCodeBlur=(name)=>{const code=localCodes[name]||"";updateTechCode(name,code);};
     return(<div style={{padding:16,maxWidth:520}}>
     <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:12}}>👷 Équipe & Codes</h2>
-    <div style={crd}>{techs.map((t,i)=>{const na=Object.values(assigns).filter(a=>a===t.name).length;const nc=reps.filter(r=>r.tech===t.name).length;return(
+    <div style={crd}>{techs.map((t,i)=>{const na=Object.values(assigns).filter(a=>a.tech===t.name).length;const nc=reps.filter(r=>r.tech===t.name).length;return(
       <div key={t.name} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<techs.length-1?`1px solid ${CL.bd}`:"none"}}>
         <div style={{flex:1}}><div style={{fontFamily:F,fontSize:13,fontWeight:700}}>{t.name}</div><div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{na} PM · {nc} CR</div></div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -787,7 +802,7 @@ export default function App(){
     const fl=resolvedPms.filter(p=>{
       if(!resolvedSearch)return true;
       const s=resolvedSearch.toLowerCase();
-      return p.code.toLowerCase().includes(s)||p.adresse.toLowerCase().includes(s)||(assigns[p.code]||"").toLowerCase().includes(s);
+      return p.code.toLowerCase().includes(s)||p.adresse.toLowerCase().includes(s)||(assigns[p.code]?.tech||"").toLowerCase().includes(s);
     });
     const resDepts=[...new Set(resolvedPms.map(p=>p.dept).filter(Boolean))].sort();
 
@@ -839,7 +854,7 @@ export default function App(){
 
   // ========== ROUTE / TOURNÉE ==========
   const RoutePg=()=>{
-    const techsWithPms=isM?[...new Set(Object.values(assigns))]:[];
+    const techsWithPms=isM?[...new Set(Object.values(assigns).map(a=>a.tech).filter(Boolean))]:[];
     const currentTech=isT?tName:null;
     const geoPms=myPms.filter(p=>p.lat&&p.lng);
     const nonGeoPms=myPms.filter(p=>!p.lat||!p.lng);
@@ -850,7 +865,7 @@ export default function App(){
       {isM&&<div style={{...crd}}>
         <h3 style={sT}>Calculer une tournée</h3>
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-          {techsWithPms.map(t=>{const n=activePms.filter(p=>assigns[p.code]===t&&p.lat).length;return(
+          {techsWithPms.map(t=>{const n=activePms.filter(p=>assigns[p.code]?.tech===t&&p.lat).length;return(
             <button key={t} onClick={()=>calcRoute(t)} style={{...b1,padding:"8px 14px",fontSize:12}}>{t} ({n} PM)</button>
           );})}
         </div>
