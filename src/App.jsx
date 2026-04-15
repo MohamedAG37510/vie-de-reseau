@@ -203,6 +203,11 @@ export default function App(){
     setPms([]);setAssigns({});
   };
 
+  const resetAssignments=async()=>{
+    await supabase.from("assignments").delete().neq("pm_code","");
+    setAssigns({});
+  };
+
   // ========== AUTH ==========
   const isM=user?.role==="manager";
   const isT=user?.role==="tech";
@@ -500,7 +505,7 @@ export default function App(){
     </div>
     <div style={crd}>
       <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{activePms.length}</strong> PM actifs · <strong>{resolvedPms.length}</strong> résolus · <strong>{depts.length}</strong> depts</div>
-      {pms.length>0&&<button onClick={resetPms} style={{...b2,marginTop:10,fontSize:11,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Réinitialiser</button>}
+      {pms.length>0&&<button onClick={()=>{if(window.confirm("Supprimer TOUS les PM et affectations ? Les CR sont conservés."))resetPms();}} style={{...b2,marginTop:10,fontSize:11,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Réinitialiser</button>}
     </div>
   </div>);
 
@@ -516,10 +521,11 @@ export default function App(){
       <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(stats.length,6)},1fr)`,gap:8,marginBottom:16}}>
         {stats.map((s,i)=>(<div key={i} onClick={s.click||undefined} style={{...crd,padding:10,display:"flex",alignItems:"center",gap:8,borderLeft:`4px solid ${s.c}`,marginBottom:0,cursor:s.click?"pointer":"default"}}><span style={{fontSize:20}}>{s.i}</span><div><div style={{fontSize:18,fontWeight:800,fontFamily:F,color:CL.dk}}>{s.v}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>{s.l}</div></div></div>))}
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:12}}>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
         <input placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:260,fontSize:13}}/>
         <select value={fDept} onChange={e=>setFDept(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous depts</option>{depts.map(d=><option key={d} value={d}>{d}</option>)}</select>
         <select value={fIW} onChange={e=>setFIW(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous IW</option><option value="10+">10+ (critique)</option><option value="7-9">7-9 (haute)</option><option value="5-6">5-6 (moyenne)</option><option value="1-4">1-4 (basse)</option><option value="0">0</option></select>
+        {isM&&Object.keys(assigns).length>0&&<button onClick={()=>{if(window.confirm("Supprimer toutes les affectations (techs + types) ?\nLes PM et CR sont conservés."))resetAssignments();}} style={{...b2,padding:"6px 12px",fontSize:10,color:"#c2410c",borderColor:"#fed7aa",marginLeft:"auto"}}>🔄 Réinitialiser les affectations</button>}
       </div>
       <div style={{...crd,padding:0,overflow:"hidden"}}>
         <div style={{display:"grid",gridTemplateColumns:isM?"2fr .5fr 2.5fr .6fr .7fr 1.4fr 1fr":"2.2fr .5fr 3fr .7fr .8fr 1fr",background:CL.dk,color:"#fff",fontFamily:F,fontSize:9,fontWeight:700,padding:"7px 10px",textTransform:"uppercase"}}>
