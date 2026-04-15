@@ -51,6 +51,7 @@ export default function App(){
   const [iwForm,setIwForm]=useState({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});
   const [iwEditId,setIwEditId]=useState(null);
   const [lightbox,setLightbox]=useState(null);
+  const [editingR,setEditingR]=useState(null); // report being edited or null
   const fileRef=useRef(null);
   const impRef=useRef(null);
   const reportRef=useRef(null);
@@ -115,6 +116,12 @@ export default function App(){
   const insertReport=async(r)=>{
     const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:r.mesures,actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[]};
     await supabase.from("reports").insert(row);
+    await loadAll();
+  };
+
+  const updateReport=async(r)=>{
+    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:r.mesures,actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
+    await supabase.from("reports").update(updates).eq("id",r.id);
     await loadAll();
   };
 
@@ -340,7 +347,23 @@ export default function App(){
     const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:""}));
     setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assigns[pm.code]||""),types:[],probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
   };
-  const submitCR=async()=>{const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");};
+  const startEditCR=(r)=>{
+    const pmCode=r.pmCode||r.pm_code||"";const pmAdresse=r.pmAdresse||r.pm_adresse||"";const pmDept=r.pmDept||r.pm_dept||"";
+    const nbCli=r.nbCli||r.nb_cli||0;const suiviTxt=r.suiviTxt||r.suivi_txt||"";
+    const iwRes=(r.iw_results||r.iwResults||[]).map(iw=>({...iw}));
+    const fakePM={code:pmCode,adresse:pmAdresse,dept:pmDept,nbIW:pms.find(p=>p.code===pmCode)?.nbIW||0};
+    setSelPM(fakePM);setEditingR(r);
+    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:r.mesures||"",actions:r.actions||"",materiel:r.materiel||"",obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,iwResults:iwRes});
+    setViewR(null);setPg("form");
+  };
+  const submitCR=async()=>{
+    if(editingR){
+      await updateReport({...form,id:editingR.id});
+      setEditingR(null);setPg("hist");
+    }else{
+      const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");
+    }
+  };
 
   // ========== LIGHTBOX ==========
   const openLightbox=(photos,index=0)=>setLightbox({photos,index});
@@ -567,19 +590,22 @@ export default function App(){
   const FormCR=()=>{
     if(!form)return null;
     const ok=form.tech&&form.types.length>0&&form.etat&&form.actions;
+    const isEdit=!!editingR;
     return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
-      <button onClick={()=>setPg("dash")} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
-      <div style={{...crd,borderLeft:`4px solid ${CL.a}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <button onClick={()=>{setPg(isEdit?"hist":"dash");if(isEdit)setEditingR(null);}} style={{...b2,marginBottom:12,fontSize:11}}>← {isEdit?"Retour au CR":"Retour"}</button>
+      {isEdit&&<div style={{background:"#dbeafe",border:"1.5px solid #3b82f6",borderRadius:8,padding:10,marginBottom:12,fontFamily:F,fontSize:12,color:"#1e40af",fontWeight:700}}>✏️ Modification du CR-{editingR.id}</div>}
+      <div style={{...crd,borderLeft:`4px solid ${isEdit?"#3b82f6":CL.a}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div><div style={{fontFamily:F,fontWeight:800,fontSize:16,color:CL.dk}}>{form.pmCode}</div><div style={{fontFamily:F,fontSize:11,color:CL.sb,marginTop:2}}>{form.pmAdresse}</div></div>
         <div style={{textAlign:"right"}}><B color={pC(selPM.nbIW)}>{pL(selPM.nbIW)}</B><div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:2}}>{selPM.nbIW} IW</div></div>
       </div>
       <div style={crd}><h3 style={sT}>📋 Infos</h3>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
-          <div><label style={lbl}>Date *</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+          <div><label style={lbl}>Date{isEdit?" (verrouillé)":" *"}</label>{isEdit?<div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.date}</div>:<input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>}</div>
           <div><label style={lbl}>Arrivée</label><input type="time" value={form.h1} onChange={e=>setForm(f=>({...f,h1:e.target.value}))} style={inp}/></div>
           <div><label style={lbl}>Départ</label><input type="time" value={form.h2} onChange={e=>setForm(f=>({...f,h2:e.target.value}))} style={inp}/></div>
         </div>
-        {isM?<div style={{marginBottom:12}}><label style={lbl}>Technicien *</label><select value={form.tech} onChange={e=>setForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">--</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>
+        {isEdit?<div style={{marginBottom:12}}><label style={lbl}>Technicien (verrouillé)</label><div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.tech}</div></div>
+        :isM?<div style={{marginBottom:12}}><label style={lbl}>Technicien *</label><select value={form.tech} onChange={e=>setForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">--</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>
         :<div style={{marginBottom:12}}><label style={lbl}>Technicien</label><div style={{...inp,background:"#f4f3ef",fontWeight:700}}>{tName}</div></div>}
         <div style={{marginBottom:12}}><label style={lbl}>Type *</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=><button key={t} onClick={()=>toggleArr("types",t)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.types.includes(t)?CL.a:CL.bd}`,background:form.types.includes(t)?"#fef2f2":"#fff",color:form.types.includes(t)?CL.a:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.types.includes(t)?"✓ ":""}{t}</button>)}</div></div>
         <div style={{marginBottom:12}}><label style={lbl}>Problèmes</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{PROBS.map(p=><button key={p} onClick={()=>toggleArr("probs",p)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.probs.includes(p)?"#dc2626":CL.bd}`,background:form.probs.includes(p)?"#fef2f2":"#fff",color:form.probs.includes(p)?"#dc2626":CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.probs.includes(p)?"✓ ":""}{p}</button>)}</div></div>
@@ -619,8 +645,8 @@ export default function App(){
         {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} onClick={()=>openLightbox(form.photos,i)} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} title="Cliquer pour agrandir"/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginBottom:30}}>
-        <button onClick={()=>setPg("dash")} style={b2}>Annuler</button>
-        <button onClick={submitCR} disabled={!ok} style={{...b1,opacity:ok?1:.4,cursor:ok?"pointer":"not-allowed",padding:"10px 24px",fontSize:14}}>✅ Valider</button>
+        <button onClick={()=>{if(isEdit){setEditingR(null);setPg("hist");}else setPg("dash");}} style={b2}>Annuler</button>
+        <button onClick={submitCR} disabled={!ok} style={{...b1,opacity:ok?1:.4,cursor:ok?"pointer":"not-allowed",padding:"10px 24px",fontSize:14,background:isEdit?"#1e40af":CL.a}}>{isEdit?"💾 Enregistrer les modifications":"✅ Valider"}</button>
       </div>
     </div>);
   };
@@ -636,7 +662,7 @@ export default function App(){
     const pmAdresse=r.pmAdresse||r.pm_adresse||"";
     const suiviTxt=r.suiviTxt||r.suivi_txt||"";
     const nbCli=r.nbCli||r.nb_cli||0;
-    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><div style={{display:"flex",gap:8,marginBottom:12}}><button onClick={()=>setViewR(null)} style={{...b2,fontSize:11}}>← Retour</button><button onClick={()=>exportPDF(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button></div>
+    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><div style={{display:"flex",gap:8,marginBottom:12}}><button onClick={()=>setViewR(null)} style={{...b2,fontSize:11}}>← Retour</button><button onClick={()=>exportPDF(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button>{isM&&<button onClick={()=>startEditCR(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#7c3aed"}}>✏️ Modifier</button>}</div>
     <div style={{...crd,border:`2px solid ${CL.a}`}}>
       <div style={{display:"flex",justifyContent:"space-between",borderBottom:`2px solid ${CL.a}`,paddingBottom:10,marginBottom:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}><Logo/><div><div style={{fontFamily:F,fontWeight:800,fontSize:15}}>Compte Rendu</div><div style={{fontFamily:F,fontSize:9,color:CL.sb}}>CR-{r.id}</div></div></div>
