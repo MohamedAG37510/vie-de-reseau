@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabase.js";
 
 const ETATS=["Bon état général","État moyen - maintenance préventive","Dégradé - intervention nécessaire","Critique - urgent","Vandalisé","Inaccessible"];
-const TYPES=["SAV - Remise en service","SAV - Remplacement équipement","SAV - Recâblage","Maintenance préventive","Nettoyage / Réorganisation","Remplacement cassette(s)","Remplacement coupleur","Soudure(s) fibre","Rebrassage","Mesure optique","Intervention multi-SAV","Autre"];
+const TYPES=["SAV - Remise en service","SAV - Remplacement équipement","SAV - Recâblage","Maintenance préventive","Nettoyage / Réorganisation","Remplacement cassette(s)","Remplacement coupleur","Soudure(s) fibre","Rebrassage","Mesure optique","Intervention multi-SAV","MSA","Autre"];
 const PROBS=["Fibres cassées","Connecteurs sales/endommagés","Cassettes mal rangées","Câbles non étiquetés","Boîtier endommagé","Infiltration d'eau","Coupleur défaillant","Soudures défectueuses","Câble sectionné","PM saturé","Vandalisme","Aucun problème"];
 
 const pC=n=>n>=10?"red":n>=7?"orange":n>=5?"blue":"gray";
