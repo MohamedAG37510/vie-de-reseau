@@ -53,6 +53,8 @@ export default function App(){
   const [iwEditId,setIwEditId]=useState(null);
   const [lightbox,setLightbox]=useState(null);
   const [editingR,setEditingR]=useState(null); // report being edited or null
+  const [notifications,setNotifications]=useState([]);
+  const [toast,setToast]=useState(null); // {message, count} or null
   const fileRef=useRef(null);
   const impRef=useRef(null);
   const reportRef=useRef(null);
@@ -63,20 +65,22 @@ export default function App(){
   // ========== SUPABASE DATA LOADING ==========
   const loadAll = useCallback(async()=>{
     try{
-      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData}] = await Promise.all([
+      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
         supabase.from("techs").select("*").order("name"),
         supabase.from("reports").select("*").order("created_at",{ascending:false}),
         supabase.from("assignments").select("*"),
         supabase.from("config").select("*"),
         supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
+        supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
       ]);
-      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null})));
+      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
       if(assData){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
       if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
       if(iwData) setIwItems(iwData);
+      if(notifData) setNotifications(notifData);
     }catch(e){console.error("Load error:",e);}
     setLoading(false);
   },[]);
@@ -150,7 +154,16 @@ export default function App(){
 
   const assignTech=async(pmCode,techName,types)=>{
     if(!techName){await supabase.from("assignments").delete().eq("pm_code",pmCode);const na={...assigns};delete na[pmCode];setAssigns(na);}
-    else{const t=types||assigns[pmCode]?.types||[];await supabase.from("assignments").upsert({pm_code:pmCode,tech_name:techName,types:t},{onConflict:"pm_code"});const na={...assigns};na[pmCode]={tech:techName,types:t};setAssigns(na);}
+    else{
+      const t=types||assigns[pmCode]?.types||[];
+      await supabase.from("assignments").upsert({pm_code:pmCode,tech_name:techName,types:t},{onConflict:"pm_code"});
+      const na={...assigns};na[pmCode]={tech:techName,types:t};setAssigns(na);
+      // Create notification for the tech
+      await supabase.from("notifications").insert({id:`notif_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,tech_name:techName,pm_code:pmCode,type:"assignment",read:false});
+      // If PM was resolved (cr_done), reactivate it
+      const pm=pms.find(p=>p.code===pmCode);
+      if(pm?.resolved){await supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",pmCode);}
+    }
     setShowAss(null);
   };
 
@@ -221,6 +234,23 @@ export default function App(){
     if(found){setUser({role:"tech",name:found.name,code});setLoginCode("");setLoginErr("");setPg("dash");return;}
     setLoginErr("Code invalide");
   };
+
+  // Show toast for unread notifications on tech login
+  useEffect(()=>{
+    if(!isT||!tName||notifications.length===0)return;
+    const myNotifs=notifications.filter(n=>n.tech_name===tName&&!n.read);
+    if(myNotifs.length===0)return;
+    const pmCodes=myNotifs.map(n=>n.pm_code);
+    setToast({message:`${myNotifs.length} nouveau${myNotifs.length>1?"x":""} PM affecté${myNotifs.length>1?"s":""} : ${pmCodes.join(", ")}`,count:myNotifs.length});
+    // Mark as read
+    const ids=myNotifs.map(n=>n.id);
+    supabase.from("notifications").update({read:true}).in("id",ids).then(()=>{
+      setNotifications(prev=>prev.filter(n=>!ids.includes(n.id)));
+    });
+    // Auto-dismiss after 8s
+    const timer=setTimeout(()=>setToast(null),8000);
+    return()=>clearTimeout(timer);
+  },[isT,tName,notifications]);
 
   // ========== GEOCODING ==========
   const geocodeAddress=async(adresse)=>{
@@ -354,7 +384,7 @@ export default function App(){
 
   const startCR=pm=>{
     const pmIws=iwForPM(pm.code);
-    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:""}));
+    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""}));
     const assInfo=assigns[pm.code]||{};
     const assignedTypes=assInfo.types||[];
     setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
@@ -373,7 +403,14 @@ export default function App(){
       await updateReport({...form,id:editingR.id});
       setEditingR(null);setPg("hist");
     }else{
-      const r={...form,id:Date.now(),created:new Date().toISOString()};await insertReport(r);setPg("ok");
+      const r={...form,id:Date.now(),created:new Date().toISOString()};
+      await insertReport(r);
+      // Mark PM as resolved (CR done) + remove assignment
+      const now=new Date().toISOString();
+      await supabase.from("pms").update({resolved:true,resolved_at:now,resolved_reason:"cr_done"}).eq("code",form.pmCode);
+      await supabase.from("assignments").delete().eq("pm_code",form.pmCode);
+      setAssigns(prev=>{const na={...prev};delete na[form.pmCode];return na;});
+      setPg("ok");
     }
   };
 
@@ -417,7 +454,7 @@ export default function App(){
     const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"}):"";const etat=typeof r.etat==="string"?r.etat:"";
     const photosHtml=(r.photos||[]).map(p=>`<div style="break-inside:avoid;text-align:center;margin-bottom:10px;"><img src="${p.data}" style="max-width:100%;max-height:250px;object-fit:contain;border-radius:6px;border:1px solid #ddd;"/>${p.label?`<div style="font-size:10px;color:#666;margin-top:3px;">${p.label}</div>`:""}</div>`).join("");
     const iwRes=r.iw_results||r.iwResults||[];
-    const iwHtml=iwRes.length>0?`<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:6px;">📋 Checklist IW (${iwRes.filter(i=>i.status==="Fait").length}/${iwRes.length})</div>${iwRes.map(iw=>{const c=iw.status==="Fait"?"#dcfce7":iw.status==="Impossible"?"#f3e8ff":iw.status==="Pas fait"?"#fee2e2":"#f9f9f7";const bc=iw.status==="Fait"?"#059669":iw.status==="Impossible"?"#7c3aed":iw.status==="Pas fait"?"#dc2626":"#999";return`<div style="padding:6px 8px;margin-bottom:3px;border-radius:4px;background:${c};border-left:3px solid ${bc};font-size:11px;"><strong style="font-family:monospace;">${iw.ref_iw}</strong>${iw.cote_oc||iw.cote_oi?` · ${iw.cote_oc?`OC:${iw.cote_oc}`:""} ${iw.cote_oi?`OI:${iw.cote_oi}`:""}`:""}  — <span style="font-weight:700;color:${bc};">${iw.status||"—"}</span>${iw.commentaire_tech?`<br/><span style="color:#1e40af;font-size:9px;">💬 Tech: ${iw.commentaire_tech}</span>`:""}</div>`;}).join("")}</div>`:"";
+    const iwHtml=iwRes.length>0?`<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:6px;">📋 Checklist IW (${iwRes.filter(i=>i.status==="Fait").length}/${iwRes.length})</div>${iwRes.map(iw=>{const c=iw.status==="Fait"?"#dcfce7":iw.status==="Impossible"?"#f3e8ff":iw.status==="Pas fait"?"#fee2e2":"#f9f9f7";const bc=iw.status==="Fait"?"#059669":iw.status==="Impossible"?"#7c3aed":iw.status==="Pas fait"?"#dc2626":"#999";return`<div style="padding:6px 8px;margin-bottom:3px;border-radius:4px;background:${c};border-left:3px solid ${bc};font-size:11px;"><strong style="font-family:monospace;">${iw.ref_iw}</strong>${iw.cote_oc||iw.cote_oi?` · ${iw.cote_oc?`OC:${iw.cote_oc}`:""} ${iw.cote_oi?`OI:${iw.cote_oi}`:""}`:""}${iw.etat_box?` · <span style="font-weight:700;color:${iw.etat_box==="OK"?"#059669":"#dc2626"};">Box:${iw.etat_box}</span>`:""}  — <span style="font-weight:700;color:${bc};">${iw.status||"—"}</span>${iw.commentaire_tech?`<br/><span style="color:#1e40af;font-size:9px;">💬 Tech: ${iw.commentaire_tech}</span>`:""}</div>`;}).join("")}</div>`:"";
     const html=`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>CR-${r.id} ${pmCode}</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'DM Sans',sans-serif;padding:30px;color:#1a1a2e;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #e63946;padding-bottom:12px;margin-bottom:20px;}.logo{display:flex;align-items:center;gap:10px;}.logo-circle{width:40px;height:40px;border-radius:50%;background:#1a1a2e;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;}.title{font-size:16px;font-weight:800;}.subtitle{font-size:9px;color:#888;}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:#fafaf6;border-radius:8px;padding:14px;margin-bottom:16px;}.full{grid-column:1/-1;}.label{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:9px;font-weight:700;text-transform:uppercase;}.badge-blue{background:#dbeafe;color:#1e40af;}.badge-red{background:#fee2e2;color:#b91c1c;}.badge-green{background:#dcfce7;color:#166534;}.badge-orange{background:#ffedd5;color:#c2410c;}.section{margin-bottom:14px;}.section-title{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:6px;}.content-box{background:#fafaf6;padding:10px;border-radius:6px;white-space:pre-wrap;font-size:11px;border-left:3px solid #e63946;}.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}.footer{margin-top:30px;padding-top:12px;border-top:1px solid #ddd;font-size:9px;color:#999;text-align:center;}@media print{body{padding:20px;}@page{size:A4;margin:15mm;}}</style></head><body>
     <div class="header"><div class="logo"><div class="logo-circle">TS</div><div><div class="title">Compte Rendu</div><div class="subtitle">CR-${r.id}</div></div></div><div style="text-align:right;"><div style="font-weight:700;">${dateStr}</div>${r.h1?`<div style="color:#888;">${r.h1} → ${r.h2||"?"}</div>`:""}</div></div>
     <div class="info-grid"><div><div class="label">PM</div><div style="font-family:monospace;font-weight:800;">${pmCode}</div></div><div><div class="label">Technicien</div><div style="font-weight:700;">${r.tech||"?"}</div></div><div class="full"><div class="label">Adresse</div><div style="font-size:11px;">${pmAdresse}</div></div></div>
@@ -653,8 +690,9 @@ export default function App(){
               <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"À traiter"}</B>
             </div>
             {iw.commentaire_mgr&&<div style={{fontFamily:F,fontSize:10,color:"#92400e",background:"#fef3c7",padding:"4px 8px",borderRadius:4,marginBottom:6}}>💬 Manager : {iw.commentaire_mgr}</div>}
-            <div style={{display:"flex",gap:4,marginBottom:6}}>
+            <div style={{display:"flex",gap:4,marginBottom:6,alignItems:"center",flexWrap:"wrap"}}>
               {["Fait","Pas fait","Impossible"].map(st=><button key={st} onClick={()=>{const nr=[...form.iwResults];nr[i]={...nr[i],status:st};setForm(f=>({...f,iwResults:nr}));}} style={{padding:"4px 10px",borderRadius:14,border:`1.5px solid ${iw.status===st?(stColors[st]||CL.bd):CL.bd}`,background:iw.status===st?(st==="Fait"?"#dcfce7":st==="Impossible"?"#f3e8ff":"#fee2e2"):"#fff",color:iw.status===st?(stColors[st]||CL.sb):CL.sb,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>{iw.status===st?"✓ ":""}{st}</button>)}
+              <select value={iw.etat_box||""} onChange={e=>{const nr=[...form.iwResults];nr[i]={...nr[i],etat_box:e.target.value};setForm(f=>({...f,iwResults:nr}));}} style={{...inp,width:80,fontSize:11,padding:"4px 6px",fontWeight:700,color:iw.etat_box==="OK"?"#059669":iw.etat_box==="NOK"?"#dc2626":CL.sb,background:iw.etat_box==="OK"?"#f0fdf4":iw.etat_box==="NOK"?"#fef2f2":"#fff"}}><option value="">Box...</option><option value="OK">✅ OK</option><option value="NOK">❌ NOK</option></select>
             </div>
             <input value={iw.commentaire_tech} onChange={e=>{const nr=[...form.iwResults];nr[i]={...nr[i],commentaire_tech:e.target.value};setForm(f=>({...f,iwResults:nr}));}} placeholder="Commentaire tech..." style={{...inp,fontSize:11,padding:"5px 8px"}}/>
           </div>);
@@ -711,7 +749,7 @@ export default function App(){
           return(<div key={iw.id||iw.ref_iw} style={{padding:8,marginBottom:4,borderRadius:6,border:`1px solid ${stC[iw.status]||CL.bd}`,background:iw.status==="Fait"?"#f0fdf4":iw.status==="Impossible"?"#faf5ff":iw.status==="Pas fait"?"#fef2f2":"#f9f9f7"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div><span style={{fontFamily:"monospace",fontSize:11,fontWeight:800}}>{iw.ref_iw}</span>{(iw.cote_oc||iw.cote_oi)&&<span style={{fontFamily:F,fontSize:9,color:CL.sb,marginLeft:6}}>{iw.cote_oc&&`OC:${iw.cote_oc}`}{iw.cote_oc&&iw.cote_oi&&" · "}{iw.cote_oi&&`OI:${iw.cote_oi}`}</span>}</div>
-              <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"—"}</B>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}>{iw.etat_box&&<B color={iw.etat_box==="OK"?"green":"red"}>Box: {iw.etat_box}</B>}<B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"—"}</B></div>
             </div>
             {iw.commentaire_mgr&&<div style={{fontFamily:F,fontSize:9,color:"#92400e",marginTop:3}}>💬 Mgr: {iw.commentaire_mgr}</div>}
             {iw.commentaire_tech&&<div style={{fontFamily:F,fontSize:9,color:"#1e40af",marginTop:2}}>💬 Tech: {iw.commentaire_tech}</div>}
@@ -724,6 +762,21 @@ export default function App(){
   };
 
   // ========== HISTORIQUE ==========
+  const exportIWListing=(crList)=>{
+    const rows=[["Code PM","Dept","Tech","Date","Réf IW (Jeton)","Côté OC","Côté OI","Statut","État Box","Commentaire Manager","Commentaire Tech"]];
+    crList.forEach(r=>{
+      const pmCode=r.pmCode||r.pm_code||"";const pmDept=r.pmDept||r.pm_dept||"";const dateStr=r.date||"";
+      (r.iw_results||r.iwResults||[]).forEach(iw=>{
+        rows.push([pmCode,pmDept,r.tech||"",dateStr,iw.ref_iw||"",iw.cote_oc||"",iw.cote_oi||"",iw.status||"",iw.etat_box||"",iw.commentaire_mgr||"",iw.commentaire_tech||""]);
+      });
+    });
+    if(rows.length<=1){alert("Aucune IW à exporter.");return;}
+    const csv=rows.map(r=>r.map(c=>`"${(c+"").replace(/"/g,'""')}"`).join(";")).join("\n");
+    const bom="\uFEFF";
+    const blob=new Blob([bom+csv],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`listing_iw_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);
+  };
+
   const Hist=()=>{
     const fl=myReps.filter(r=>{
       const s=histSearch.toLowerCase();
@@ -745,6 +798,7 @@ export default function App(){
         <div><label style={{...lbl,marginBottom:2}}>Du</label><input type="date" value={histDateFrom} onChange={e=>setHistDateFrom(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
         <div><label style={{...lbl,marginBottom:2}}>Au</label><input type="date" value={histDateTo} onChange={e=>setHistDateTo(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
         {(histDateFrom||histDateTo)&&<button onClick={()=>{setHistDateFrom("");setHistDateTo("");}} style={{...b2,padding:"6px 10px",fontSize:10}}>✕ Reset</button>}
+        {fl.length>0&&<button onClick={()=>exportIWListing(fl)} style={{...b1,padding:"6px 12px",fontSize:10,background:"#059669",marginLeft:"auto"}}>📥 Export listing IW</button>}
       </div>
       {fl.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
         <div style={{...crd,padding:8,marginBottom:0,borderLeft:"4px solid #2563eb",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>📝</span><div><div style={{fontSize:16,fontWeight:800,fontFamily:F}}>{fl.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>CR</div></div></div>
@@ -837,8 +891,9 @@ export default function App(){
             {fl.map((pm,i)=>{
               const pmReps=reps.filter(r=>(r.pmCode||r.pm_code)===pm.code);
               const resDate=pm.resolved_at?new Date(pm.resolved_at).toLocaleDateString("fr-FR"):"—";
+              const isCrDone=pm.resolved_reason==="cr_done";
               return(<div key={pm.code} style={{display:"grid",gridTemplateColumns:"2fr .5fr 2.5fr .8fr 1fr 1.2fr",padding:"8px 10px",fontFamily:F,fontSize:11,background:i%2===0?"#fff":"#f0fdf4",borderBottom:`1px solid ${CL.bd}`,alignItems:"center"}}>
-                <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}</div>
+                <div><div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}</div>{isCrDone&&<B color="green">CR effectué</B>}{!isCrDone&&<B color="gray">Import</B>}</div>
                 <div style={{color:CL.sb,fontSize:10}}>{pm.dept}</div>
                 <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
                 <div style={{textAlign:"center"}}>
@@ -847,7 +902,7 @@ export default function App(){
                 </div>
                 <div style={{textAlign:"center",fontFamily:F,fontSize:9,color:CL.sb}}>{resDate}</div>
                 <div style={{textAlign:"center"}}>
-                  <button onClick={()=>reactivatePM(pm.code)} style={{...b2,padding:"3px 8px",fontSize:9,color:"#2563eb",borderColor:"#93c5fd"}} title="Réactiver ce PM">🔄 Réactiver</button>
+                  <button onClick={()=>{setShowAss(pm.code);setAssTypes([]);}} style={{...b2,padding:"3px 8px",fontSize:9,color:"#2563eb",borderColor:"#93c5fd"}} title="Réaffecter ce PM">🔄 Réaffecter</button>
                 </div>
               </div>);
             })}
@@ -918,5 +973,6 @@ export default function App(){
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
     {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="route"&&RoutePg()}
     {Lightbox()}
+    {toast&&<div onClick={()=>setToast(null)} style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:"#1e40af",color:"#fff",fontFamily:F,fontSize:13,fontWeight:700,padding:"14px 24px",borderRadius:12,boxShadow:"0 8px 32px rgba(0,0,0,.25)",zIndex:9998,cursor:"pointer",maxWidth:"90vw",textAlign:"center",animation:"slideDown .4s ease"}}><style>{`@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-20px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}`}</style>🔔 {toast.message}</div>}
   </div>);
 }
