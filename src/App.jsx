@@ -4,6 +4,7 @@ import { supabase } from "./supabase.js";
 const ETATS=["Bon état général","État moyen - maintenance préventive","Dégradé - intervention nécessaire","Critique - urgent","Vandalisé","Inaccessible"];
 const TYPES=["SAV - Remise en service","SAV - Remplacement équipement","SAV - Recâblage","Maintenance préventive","Nettoyage / Réorganisation","Remplacement cassette(s)","Remplacement coupleur","Soudure(s) fibre","Rebrassage","Mesure optique","Intervention multi-SAV","MSA","Autre"];
 const PROBS=["Fibres cassées","Connecteurs sales/endommagés","Cassettes mal rangées","Câbles non étiquetés","Boîtier endommagé","Infiltration d'eau","Coupleur défaillant","Soudures défectueuses","Câble sectionné","PM saturé","Vandalisme","Aucun problème"];
+const REJECT_MSGS=["Photos manquantes","Mesures optiques incomplètes","Actions non détaillées","État box non renseigné","Checklist IW incomplète","Matériel non précisé","Observations insuffisantes"];
 
 const pC=n=>n>=10?"red":n>=7?"orange":n>=5?"blue":"gray";
 const pL=n=>n>=10?"Critique":n>=7?"Haute":n>=5?"Moyenne":"Basse";
@@ -54,7 +55,12 @@ export default function App(){
   const [lightbox,setLightbox]=useState(null);
   const [editingR,setEditingR]=useState(null); // report being edited or null
   const [notifications,setNotifications]=useState([]);
-  const [toast,setToast]=useState(null); // {message, count} or null
+  const [toast,setToast]=useState(null);
+  const [fTech,setFTech]=useState("all"); // tech filter on dashboard
+  const [showReject,setShowReject]=useState(null); // report to reject
+  const [rejectPresets,setRejectPresets]=useState([]);
+  const [rejectCustom,setRejectCustom]=useState("");
+  const [messages,setMessages]=useState([]); // {message, count} or null
   const fileRef=useRef(null);
   const impRef=useRef(null);
   const reportRef=useRef(null);
@@ -65,7 +71,7 @@ export default function App(){
   // ========== SUPABASE DATA LOADING ==========
   const loadAll = useCallback(async()=>{
     try{
-      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData}] = await Promise.all([
+      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
         supabase.from("techs").select("*").order("name"),
         supabase.from("reports").select("*").order("created_at",{ascending:false}),
@@ -73,6 +79,7 @@ export default function App(){
         supabase.from("config").select("*"),
         supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
         supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
+        supabase.from("messages").select("*").order("created_at",{ascending:false}),
       ]);
       if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
@@ -81,6 +88,7 @@ export default function App(){
       if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
       if(iwData) setIwItems(iwData);
       if(notifData) setNotifications(notifData);
+      if(msgData) setMessages(msgData);
     }catch(e){console.error("Load error:",e);}
     setLoading(false);
   },[]);
@@ -99,7 +107,7 @@ export default function App(){
   },[]);
   useEffect(()=>{
     let timer=null;
-    const debouncedLoad=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!typingRef.current)loadAll();},5000);};
+    const debouncedLoad=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!typingRef.current)loadAll();},2000);};
     const ch = supabase.channel("all-changes")
       .on("postgres_changes",{event:"*",schema:"public",table:"pms"},debouncedLoad)
       .on("postgres_changes",{event:"*",schema:"public",table:"reports"},debouncedLoad)
@@ -119,15 +127,17 @@ export default function App(){
   const saveR=async(allReps)=>{setReps(allReps);};
 
   const insertReport=async(r)=>{
-    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:r.mesures,actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[]};
-    await supabase.from("reports").insert(row);
-    await loadAll();
+    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[]};
+    // Optimistic: add to local state immediately
+    setReps(prev=>[{...row,...r,pmCode:r.pmCode,pmAdresse:r.pmAdresse,pmDept:r.pmDept,nbCli:r.nbCli,suiviTxt:r.suiviTxt,validation:"pending"},...prev]);
+    supabase.from("reports").insert(row);
   };
 
   const updateReport=async(r)=>{
-    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:r.mesures,actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
-    await supabase.from("reports").update(updates).eq("id",r.id);
-    await loadAll();
+    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
+    // Optimistic update
+    setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,...updates,nbCli:r.nbCli,suiviTxt:r.suiviTxt,types:r.types,probs:r.probs,etat:r.etat,iwResults:r.iwResults}:rep));
+    supabase.from("reports").update(updates).eq("id",r.id);
   };
 
   const delR=async(id)=>{
@@ -137,14 +147,15 @@ export default function App(){
   };
 
   const addTech=async(name)=>{
-    await supabase.from("techs").insert({name,code:""});
-    await loadAll();
+    supabase.from("techs").insert({name,code:""});
+    setTechs(prev=>[...prev,{name,code:""}].sort((a,b)=>a.name.localeCompare(b.name)));
   };
 
   const removeTech=async(name)=>{
-    await supabase.from("techs").delete().eq("name",name);
-    await supabase.from("assignments").delete().eq("tech_name",name);
-    await loadAll();
+    supabase.from("techs").delete().eq("name",name);
+    supabase.from("assignments").delete().eq("tech_name",name);
+    setTechs(prev=>prev.filter(t=>t.name!==name));
+    setAssigns(prev=>{const na={...prev};Object.keys(na).forEach(k=>{if(na[k]?.tech===name)delete na[k];});return na;});
   };
 
   const updateTechCode=async(name,code)=>{
@@ -205,8 +216,8 @@ export default function App(){
 
   // ========== REACTIVATE PM ==========
   const reactivatePM=async(code)=>{
-    await supabase.from("pms").update({resolved:false,resolved_at:null}).eq("code",code);
-    await loadAll();
+    setPms(prev=>prev.map(p=>p.code===code?{...p,resolved:false,resolved_at:null,resolved_reason:null}:p));
+    supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",code);
   };
 
   // ========== DELETE PMS ==========
@@ -235,22 +246,40 @@ export default function App(){
     setLoginErr("Code invalide");
   };
 
-  // Show toast for unread notifications on tech login
+  // Show toast for unread notifications on login
   useEffect(()=>{
-    if(!isT||!tName||notifications.length===0)return;
-    const myNotifs=notifications.filter(n=>n.tech_name===tName&&!n.read);
-    if(myNotifs.length===0)return;
-    const pmCodes=myNotifs.map(n=>n.pm_code);
-    setToast({message:`${myNotifs.length} nouveau${myNotifs.length>1?"x":""} PM affecté${myNotifs.length>1?"s":""} : ${pmCodes.join(", ")}`,count:myNotifs.length});
-    // Mark as read
-    const ids=myNotifs.map(n=>n.id);
-    supabase.from("notifications").update({read:true}).in("id",ids).then(()=>{
-      setNotifications(prev=>prev.filter(n=>!ids.includes(n.id)));
-    });
-    // Auto-dismiss after 8s
+    if(!user)return;
+    const toasts=[];
+    if(isT&&tName){
+      // Tech: assignment notifications
+      const myNotifs=notifications.filter(n=>n.tech_name===tName&&!n.read);
+      if(myNotifs.length>0){
+        const pmCodes=myNotifs.map(n=>n.pm_code);
+        toasts.push(`📌 ${myNotifs.length} nouveau${myNotifs.length>1?"x":""} PM : ${pmCodes.join(", ")}`);
+        const ids=myNotifs.map(n=>n.id);
+        supabase.from("notifications").update({read:true}).in("id",ids).then(()=>{
+          setNotifications(prev=>prev.filter(n=>!ids.includes(n.id)));
+        });
+      }
+      // Tech: rejection messages
+      const unreadMsgs=messages.filter(m=>m.tech_name===tName&&m.type==="rejection"&&!m.read);
+      if(unreadMsgs.length>0){
+        toasts.push(`🔄 ${unreadMsgs.length} CR renvoyé${unreadMsgs.length>1?"s":""} à corriger`);
+      }
+    }
+    if(isM){
+      // Manager: pending CRs
+      const pending=reps.filter(r=>r.validation==="pending").length;
+      if(pending>0) toasts.push(`🟡 ${pending} CR en attente de validation`);
+      // Manager: resubmitted CRs
+      const resubs=messages.filter(m=>m.type==="resubmission"&&!m.read).length;
+      if(resubs>0) toasts.push(`✏️ ${resubs} CR corrigé${resubs>1?"s":""} à revalider`);
+    }
+    if(toasts.length===0)return;
+    setToast({message:toasts.join("\n")});
     const timer=setTimeout(()=>setToast(null),8000);
     return()=>clearTimeout(timer);
-  },[isT,tName,notifications]);
+  },[user,isT,isM,tName,notifications,messages,reps]);
 
   // ========== GEOCODING ==========
   const geocodeAddress=async(adresse)=>{
@@ -377,7 +406,8 @@ export default function App(){
     const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
     const md=fDept==="all"||pm.dept===fDept;
     const mi=fIW==="all"||(fIW==="10+"&&pm.nbIW>=10)||(fIW==="7-9"&&pm.nbIW>=7&&pm.nbIW<=9)||(fIW==="5-6"&&pm.nbIW>=5&&pm.nbIW<=6)||(fIW==="1-4"&&pm.nbIW>=1&&pm.nbIW<=4)||(fIW==="0"&&pm.nbIW===0);
-    return ms&&md&&mi;
+    const mt=fTech==="all"||(fTech==="unassigned"?!assigns[pm.code]?.tech:assigns[pm.code]?.tech===fTech);
+    return ms&&md&&mi&&mt;
   });
   const myReps=isT?reps.filter(r=>r.tech===tName):reps;
   const repsFor=code=>myReps.filter(r=>r.pmCode===code);
@@ -387,7 +417,7 @@ export default function App(){
     const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""}));
     const assInfo=assigns[pm.code]||{};
     const assignedTypes=assInfo.types||[];
-    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:"",actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
+    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:[],actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
   };
   const startEditCR=(r)=>{
     const pmCode=r.pmCode||r.pm_code||"";const pmAdresse=r.pmAdresse||r.pm_adresse||"";const pmDept=r.pmDept||r.pm_dept||"";
@@ -395,23 +425,70 @@ export default function App(){
     const iwRes=(r.iw_results||r.iwResults||[]).map(iw=>({...iw}));
     const fakePM={code:pmCode,adresse:pmAdresse,dept:pmDept,nbIW:pms.find(p=>p.code===pmCode)?.nbIW||0};
     setSelPM(fakePM);setEditingR(r);
-    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:r.mesures||"",actions:r.actions||"",materiel:r.materiel||"",obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,iwResults:iwRes});
+    let parsedMesures=[];
+    try{if(typeof r.mesures==="string"&&r.mesures.startsWith("["))parsedMesures=JSON.parse(r.mesures);else if(typeof r.mesures==="string"&&r.mesures.trim())parsedMesures=[{coupleur:1,valeur:r.mesures}];else if(Array.isArray(r.mesures))parsedMesures=r.mesures;}catch{parsedMesures=r.mesures?[{coupleur:1,valeur:r.mesures}]:[];}
+    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:parsedMesures,actions:r.actions||"",materiel:r.materiel||"",obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,iwResults:iwRes});
     setViewR(null);setPg("form");
   };
   const submitCR=async()=>{
     if(editingR){
+      // Re-submitting after rejection or editing → reset to pending
       await updateReport({...form,id:editingR.id});
+      setReps(prev=>prev.map(rep=>rep.id===editingR.id?{...rep,validation:"pending",rejection_msg:null}:rep));
+      supabase.from("reports").update({validation:"pending",rejection_msg:null}).eq("id",editingR.id);
+      // Notify manager that tech has resubmitted
+      if(editingR.validation==="rejected"){
+        const msgId=`msg_${Date.now()}_resub`;
+        const techN=form.tech||tName;
+        const pmC=form.pmCode;
+        supabase.from("messages").insert({id:msgId,tech_name:techN,pm_code:pmC,report_id:editingR.id,type:"resubmission",message:`CR corrigé et ressoumis par ${techN} pour ${pmC}`,read:false});
+        setMessages(prev=>[{id:msgId,tech_name:techN,pm_code:pmC,report_id:editingR.id,type:"resubmission",message:`CR corrigé et ressoumis par ${techN} pour ${pmC}`,read:false,created_at:new Date().toISOString()},...prev]);
+        // Re-mark PM as pending validation
+        setPms(prev=>prev.map(p=>p.code===pmC?{...p,resolved:true,resolved_reason:"pending_validation"}:p));
+        supabase.from("pms").update({resolved:true,resolved_reason:"pending_validation"}).eq("code",pmC);
+      }
       setEditingR(null);setPg("hist");
     }else{
       const r={...form,id:Date.now(),created:new Date().toISOString()};
       await insertReport(r);
-      // Mark PM as resolved (CR done) + remove assignment
+      // Optimistic: mark PM as pending validation
       const now=new Date().toISOString();
-      await supabase.from("pms").update({resolved:true,resolved_at:now,resolved_reason:"cr_done"}).eq("code",form.pmCode);
-      await supabase.from("assignments").delete().eq("pm_code",form.pmCode);
-      setAssigns(prev=>{const na={...prev};delete na[form.pmCode];return na;});
+      setPms(prev=>prev.map(p=>p.code===form.pmCode?{...p,resolved:true,resolved_at:now,resolved_reason:"pending_validation"}:p));
+      supabase.from("reports").update({validation:"pending"}).eq("id",r.id);
+      supabase.from("pms").update({resolved:true,resolved_at:now,resolved_reason:"pending_validation"}).eq("code",form.pmCode);
       setPg("ok");
     }
+  };
+
+  // ========== VALIDATION (Manager) ==========
+  const validateCR=async(r)=>{
+    const pmCode=r.pmCode||r.pm_code;
+    // Optimistic: update local state immediately
+    setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,validation:"validated"}:rep));
+    setPms(prev=>prev.map(p=>p.code===pmCode?{...p,resolved:true,resolved_reason:"cr_done"}:p));
+    setAssigns(prev=>{const na={...prev};delete na[pmCode];return na;});
+    setViewR(null);
+    // Fire Supabase writes (no await needed for UI)
+    supabase.from("reports").update({validation:"validated"}).eq("id",r.id);
+    supabase.from("pms").update({resolved_reason:"cr_done"}).eq("code",pmCode);
+    supabase.from("assignments").delete().eq("pm_code",pmCode);
+  };
+
+  const rejectCR=async(r)=>{
+    const msg=[...rejectPresets,rejectCustom.trim()].filter(Boolean).join(" · ");
+    if(!msg){alert("Ajoutez un motif de renvoi.");return;}
+    const pmCode=r.pmCode||r.pm_code;
+    const msgId=`msg_${Date.now()}`;
+    // Optimistic: update local state immediately
+    setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,validation:"rejected",rejection_msg:msg}:rep));
+    setPms(prev=>prev.map(p=>p.code===pmCode?{...p,resolved:false,resolved_at:null,resolved_reason:null}:p));
+    setMessages(prev=>[{id:msgId,tech_name:r.tech,pm_code:pmCode,report_id:r.id,type:"rejection",message:msg,read:false,created_at:new Date().toISOString()},...prev]);
+    setShowReject(null);setRejectPresets([]);setRejectCustom("");
+    setViewR(null);
+    // Fire Supabase writes
+    supabase.from("reports").update({validation:"rejected",rejection_msg:msg}).eq("id",r.id);
+    supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",pmCode);
+    supabase.from("messages").insert({id:msgId,tech_name:r.tech,pm_code:pmCode,report_id:r.id,type:"rejection",message:msg,read:false});
   };
 
   // ========== LIGHTBOX ==========
@@ -461,11 +538,10 @@ export default function App(){
     <div class="section"><div class="section-title">Type</div>${(r.types||[]).map(t=>`<span class="badge badge-blue">${t}</span> `).join("")}</div>
     <div class="section"><div class="section-title">État</div><span class="badge ${etat.includes("Bon")?"badge-green":etat.includes("Critique")?"badge-red":"badge-orange"}">${etat||"N/A"}</span></div>
     ${(r.probs||[]).length>0?`<div class="section"><div class="section-title">Problèmes</div>${r.probs.map(p=>`<span class="badge badge-red">${p}</span> `).join("")}</div>`:""}
-    ${r.actions?`<div class="section"><div class="section-title">Actions</div><div class="content-box">${r.actions}</div></div>`:""}
+    ${r.obs?`<div class="section"><div class="section-title">Observations</div><div class="content-box">${r.obs}</div></div>`:""}
     ${nbCli>0?`<div class="section"><div class="section-title">Clients rétablis</div><span class="badge badge-green">${nbCli}</span></div>`:""}
-    ${r.mesures?`<div class="section"><div class="section-title">Mesures</div><div style="font-family:monospace;font-size:10px;background:#f1f5f9;padding:8px;border-radius:4px;white-space:pre-wrap;">${r.mesures}</div></div>`:""}
+    ${(()=>{let mes=r.mesures;try{if(typeof mes==="string"&&mes.startsWith("["))mes=JSON.parse(mes);}catch{}if(Array.isArray(mes)&&mes.length>0)return`<div class="section"><div class="section-title">Mesures optiques</div><div style="background:#f1f5f9;border-radius:4px;overflow:hidden;">${mes.map((m,i)=>`<div style="display:flex;padding:5px 10px;border-bottom:${i<mes.length-1?"1px solid #ddd":"none"};font-size:11px;"><strong style="min-width:90px;">Coupleur ${m.coupleur}</strong><span style="font-family:monospace;color:#1e40af;font-weight:600;">${m.valeur}</span></div>`).join("")}</div></div>`;if(typeof mes==="string"&&mes.trim())return`<div class="section"><div class="section-title">Mesures</div><div style="font-family:monospace;font-size:10px;background:#f1f5f9;padding:8px;border-radius:4px;white-space:pre-wrap;">${mes}</div></div>`;return"";})()}
     ${r.materiel?`<div class="section"><div class="section-title">Matériel</div><div style="font-size:11px;white-space:pre-wrap;">${r.materiel}</div></div>`:""}
-    ${r.obs?`<div class="section"><div class="section-title">Observations</div><div style="font-size:11px;font-style:italic;white-space:pre-wrap;">${r.obs}</div></div>`:""}
     ${iwHtml}
     ${r.suivi?`<div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:6px;padding:10px;margin-bottom:14px;"><div style="font-size:10px;font-weight:800;color:#92400e;">⚠️ SUIVI</div><div style="font-size:11px;color:#78350f;">${suiviTxt}</div></div>`:""}
     ${(r.photos||[]).length>0?`<div class="section"><div class="section-title">📸 Photos (${r.photos.length})</div><div class="photos">${photosHtml}</div></div>`:""}
@@ -524,6 +600,8 @@ export default function App(){
         {isT&&<button onClick={()=>{setPg("dash");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="dash"?CL.a:"rgba(255,255,255,.06)",color:pg==="dash"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🏗️ Mes PM</button>}
         <button onClick={()=>{setPg("hist");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="hist"?CL.a:"rgba(255,255,255,.06)",color:pg==="hist"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 CR</button>
         <button onClick={()=>{setPg("route");setShowRoute(false);}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="route"?CL.a:"rgba(255,255,255,.06)",color:pg==="route"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Tournée</button>
+        {isT&&(()=>{const unread=messages.filter(m=>m.tech_name===tName&&!m.read).length;return <button onClick={()=>setPg("messages")} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="messages"?CL.a:"rgba(255,255,255,.06)",color:pg==="messages"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer",position:"relative"}}>💬 Messages{unread>0&&<span style={{position:"absolute",top:-4,right:-4,width:16,height:16,borderRadius:"50%",background:"#dc2626",color:"#fff",fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>;})()}
+        {isM&&(()=>{const pendingCR=reps.filter(r=>r.validation==="pending").length;const unreadMgr=messages.filter(m=>m.type==="resubmission"&&!m.read).length;const total=pendingCR+unreadMgr;return <button onClick={()=>setPg("messages")} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="messages"?CL.a:"rgba(255,255,255,.06)",color:pg==="messages"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer",position:"relative"}}>💬 Suivi{total>0&&<span style={{position:"absolute",top:-4,right:-4,width:16,height:16,borderRadius:"50%",background:"#dc2626",color:"#fff",fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{total}</span>}</button>;})()}
         {isM&&<button onClick={()=>{setPg("team");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="team"?CL.a:"rgba(255,255,255,.06)",color:pg==="team"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>👷 Équipe</button>}
         {isM&&<button onClick={()=>{setPg("resolved");setResolvedSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="resolved"?CL.a:"rgba(255,255,255,.06)",color:pg==="resolved"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>✅ Résolus{resolvedPms.length>0?` (${resolvedPms.length})`:""}</button>}
         <button onClick={()=>setUser(null)} style={{padding:"5px 8px",borderRadius:4,border:"1px solid rgba(255,255,255,.2)",background:"transparent",color:"#fca5a5",fontFamily:F,fontSize:9,fontWeight:700,cursor:"pointer",marginLeft:4}}>⏏</button>
@@ -562,6 +640,7 @@ export default function App(){
         <input placeholder="🔍 Rechercher..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inp,maxWidth:260,fontSize:13}}/>
         <select value={fDept} onChange={e=>setFDept(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous depts</option>{depts.map(d=><option key={d} value={d}>{d}</option>)}</select>
         <select value={fIW} onChange={e=>setFIW(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous IW</option><option value="10+">10+ (critique)</option><option value="7-9">7-9 (haute)</option><option value="5-6">5-6 (moyenne)</option><option value="1-4">1-4 (basse)</option><option value="0">0</option></select>
+        {isM&&<select value={fTech} onChange={e=>setFTech(e.target.value)} style={{...inp,maxWidth:140,fontSize:13}}><option value="all">Tous techs</option><option value="unassigned">Non affectés</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select>}
         {isM&&Object.keys(assigns).length>0&&<button onClick={()=>{if(window.confirm("Supprimer toutes les affectations (techs + types) ?\nLes PM et CR sont conservés."))resetAssignments();}} style={{...b2,padding:"6px 12px",fontSize:10,color:"#c2410c",borderColor:"#fed7aa",marginLeft:"auto"}}>🔄 Réinitialiser les affectations</button>}
       </div>
       <div style={{...crd,padding:0,overflow:"hidden"}}>
@@ -646,7 +725,7 @@ export default function App(){
   // ========== FORM ==========
   const FormCR=()=>{
     if(!form)return null;
-    const ok=form.tech&&form.types.length>0&&form.etat&&form.actions;
+    const ok=form.tech&&form.types.length>0&&form.etat&&form.obs;
     const isEdit=!!editingR;
     return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
       <button onClick={()=>{setPg(isEdit?"hist":"dash");if(isEdit)setEditingR(null);}} style={{...b2,marginBottom:12,fontSize:11}}>← {isEdit?"Retour au CR":"Retour"}</button>
@@ -671,10 +750,19 @@ export default function App(){
         <div><label style={lbl}>Clients rétablis</label><input type="number" min="0" value={form.nbCli} onChange={e=>setForm(f=>({...f,nbCli:parseInt(e.target.value)||0}))} style={{...inp,maxWidth:90}}/></div>
       </div>
       <div style={crd}><h3 style={sT}>🔧 Technique</h3>
-        <div style={{marginBottom:12}}><label style={lbl}>Actions *</label><textarea value={form.actions} onChange={e=>setForm(f=>({...f,actions:e.target.value}))} rows={3} style={{...inp,resize:"vertical"}}/></div>
-        <div style={{marginBottom:12}}><label style={lbl}>Mesures</label><textarea value={form.mesures} onChange={e=>setForm(f=>({...f,mesures:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></div>
+        <div style={{marginBottom:12}}><label style={lbl}>Observations *</label><textarea value={form.obs} onChange={e=>setForm(f=>({...f,obs:e.target.value}))} rows={3} style={{...inp,resize:"vertical"}}/></div>
+        <div style={{marginBottom:12}}>
+          <label style={lbl}>Mesures optiques</label>
+          {(form.mesures||[]).map((m,i)=>(
+            <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
+              <span style={{fontFamily:F,fontSize:11,fontWeight:700,color:CL.dk,minWidth:85}}>Coupleur {m.coupleur}</span>
+              <input value={m.valeur} onChange={e=>{const nm=[...form.mesures];nm[i]={...nm[i],valeur:e.target.value};setForm(f=>({...f,mesures:nm}));}} placeholder="Ex: -16 dBm" style={{...inp,flex:1,fontSize:12,padding:"6px 10px"}}/>
+              <button onClick={()=>setForm(f=>({...f,mesures:f.mesures.filter((_,j)=>j!==i)}))} style={{...b2,padding:"3px 8px",fontSize:10,color:"#dc2626",flexShrink:0}}>✕</button>
+            </div>
+          ))}
+          <button onClick={()=>setForm(f=>({...f,mesures:[...(f.mesures||[]),{coupleur:(f.mesures||[]).length+1,valeur:""}]}))} style={{...b2,padding:"5px 12px",fontSize:10,color:"#2563eb",borderColor:"#93c5fd",marginTop:4}}>+ Ajouter un coupleur</button>
+        </div>
         <div style={{marginBottom:12}}><label style={lbl}>Matériel</label><textarea value={form.materiel} onChange={e=>setForm(f=>({...f,materiel:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></div>
-        <div style={{marginBottom:12}}><label style={lbl}>Observations</label><textarea value={form.obs} onChange={e=>setForm(f=>({...f,obs:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></div>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><input type="checkbox" checked={form.suivi} onChange={e=>setForm(f=>({...f,suivi:e.target.checked}))} style={{width:16,height:16,accentColor:CL.a}}/><label style={{fontFamily:F,fontSize:12,fontWeight:700}}>Suivi nécessaire</label></div>
         {form.suivi&&<textarea value={form.suiviTxt} onChange={e=>setForm(f=>({...f,suiviTxt:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/>}
       </div>
@@ -721,7 +809,11 @@ export default function App(){
     const pmAdresse=r.pmAdresse||r.pm_adresse||"";
     const suiviTxt=r.suiviTxt||r.suivi_txt||"";
     const nbCli=r.nbCli||r.nb_cli||0;
-    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><div style={{display:"flex",gap:8,marginBottom:12}}><button onClick={()=>setViewR(null)} style={{...b2,fontSize:11}}>← Retour</button><button onClick={()=>exportPDF(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button>{isM&&<button onClick={()=>startEditCR(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#7c3aed"}}>✏️ Modifier</button>}</div>
+    const validation=r.validation||"pending";
+    return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}><div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}><button onClick={()=>setViewR(null)} style={{...b2,fontSize:11}}>← Retour</button><button onClick={()=>exportPDF(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button>{isM&&<button onClick={()=>startEditCR(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#7c3aed"}}>✏️ Modifier</button>}{isM&&validation==="pending"&&<><button onClick={()=>validateCR(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#059669"}}>✅ Valider</button><button onClick={()=>{setShowReject(r);setRejectPresets([]);setRejectCustom("");}} style={{...b1,fontSize:11,padding:"6px 14px",background:"#dc2626"}}>🔄 Renvoyer</button></>}{isT&&validation==="rejected"&&<button onClick={()=>startEditCR(r)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#f59e0b"}}>✏️ Corriger et resoumettre</button>}</div>
+    {validation==="pending"&&<div style={{background:"#fef3c7",border:"1.5px solid #f59e0b",borderRadius:8,padding:10,marginBottom:12,fontFamily:F,fontSize:12,color:"#92400e",fontWeight:700}}>🟡 En attente de validation par le manager</div>}
+    {validation==="validated"&&<div style={{background:"#dcfce7",border:"1.5px solid #22c55e",borderRadius:8,padding:10,marginBottom:12,fontFamily:F,fontSize:12,color:"#166534",fontWeight:700}}>✅ CR validé</div>}
+    {validation==="rejected"&&<div style={{background:"#fee2e2",border:"1.5px solid #ef4444",borderRadius:8,padding:10,marginBottom:12,fontFamily:F,fontSize:12,color:"#b91c1c",fontWeight:700}}>🔄 CR renvoyé — {r.rejection_msg||""}</div>}
     <div style={{...crd,border:`2px solid ${CL.a}`}}>
       <div style={{display:"flex",justifyContent:"space-between",borderBottom:`2px solid ${CL.a}`,paddingBottom:10,marginBottom:14}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}><Logo/><div><div style={{fontFamily:F,fontWeight:800,fontSize:15}}>Compte Rendu</div><div style={{fontFamily:F,fontSize:9,color:CL.sb}}>CR-{r.id}</div></div></div>
@@ -737,11 +829,10 @@ export default function App(){
         <div><div style={{...lbl,marginBottom:3}}>État</div><B color={etat.includes("Bon")?"green":etat.includes("Critique")?"red":"orange"}>{etat||"N/A"}</B></div>
       </div>
       {r.probs?.length>0&&<div style={{marginBottom:12}}><div style={{...lbl,marginBottom:3}}>Problèmes</div><div style={{display:"flex",flexWrap:"wrap",gap:2}}>{r.probs.map(p=><B key={p} color="red">{p}</B>)}</div></div>}
-      {r.actions&&<div style={{marginBottom:12}}><div style={{...lbl,marginBottom:3}}>Actions</div><div style={{fontFamily:F,fontSize:12,background:"#fafaf6",padding:8,borderRadius:6,whiteSpace:"pre-wrap",borderLeft:`3px solid ${CL.a}`}}>{r.actions}</div></div>}
+      {r.obs&&<div style={{marginBottom:12}}><div style={{...lbl,marginBottom:3}}>Observations</div><div style={{fontFamily:F,fontSize:12,background:"#fafaf6",padding:8,borderRadius:6,whiteSpace:"pre-wrap",borderLeft:`3px solid ${CL.a}`}}>{r.obs}</div></div>}
       {nbCli>0&&<div style={{marginBottom:10}}><span style={lbl}>Clients: </span><B color="green">{nbCli}</B></div>}
-      {r.mesures&&<div style={{marginBottom:10}}><div style={lbl}>Mesures</div><div style={{fontFamily:"monospace",fontSize:10,background:"#f1f5f9",padding:6,borderRadius:4,whiteSpace:"pre-wrap"}}>{r.mesures}</div></div>}
+      {(()=>{let mes=r.mesures;try{if(typeof mes==="string"&&mes.startsWith("["))mes=JSON.parse(mes);}catch{}if(Array.isArray(mes)&&mes.length>0)return<div style={{marginBottom:10}}><div style={lbl}>Mesures optiques</div><div style={{background:"#f1f5f9",borderRadius:6,overflow:"hidden"}}>{mes.map((m,i)=><div key={i} style={{display:"flex",padding:"5px 10px",borderBottom:i<mes.length-1?`1px solid ${CL.bd}`:"none",fontFamily:F,fontSize:11}}><span style={{fontWeight:700,minWidth:90,color:CL.dk}}>Coupleur {m.coupleur}</span><span style={{fontFamily:"monospace",color:"#1e40af",fontWeight:600}}>{m.valeur}</span></div>)}</div></div>;if(typeof mes==="string"&&mes.trim())return<div style={{marginBottom:10}}><div style={lbl}>Mesures</div><div style={{fontFamily:"monospace",fontSize:10,background:"#f1f5f9",padding:6,borderRadius:4,whiteSpace:"pre-wrap"}}>{mes}</div></div>;return null;})()}
       {r.materiel&&<div style={{marginBottom:10}}><div style={lbl}>Matériel</div><div style={{fontFamily:F,fontSize:11,whiteSpace:"pre-wrap"}}>{r.materiel}</div></div>}
-      {r.obs&&<div style={{marginBottom:10}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:11,fontStyle:"italic",whiteSpace:"pre-wrap"}}>{r.obs}</div></div>}
       {(r.iw_results||r.iwResults||[]).length>0&&<div style={{marginBottom:12}}>
         <div style={{...lbl,marginBottom:6}}>📋 Checklist IW ({(r.iw_results||r.iwResults).filter(iw=>iw.status==="Fait").length}/{(r.iw_results||r.iwResults).length})</div>
         {(r.iw_results||r.iwResults).map(iw=>{
@@ -818,6 +909,9 @@ export default function App(){
             <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
               <span style={{fontFamily:F,fontWeight:800,fontSize:12}}>{r.pmCode||r.pm_code}</span>
               <B color={etat.includes("Bon")?"green":etat.includes("Critique")?"red":"orange"}>{etat||"N/A"}</B>
+              {(r.validation==="pending"||!r.validation)&&<B color="orange">🟡</B>}
+              {r.validation==="validated"&&<B color="green">✅</B>}
+              {r.validation==="rejected"&&<B color="red">🔄</B>}
               {r.suivi&&<B color="orange">⚠️</B>}
               {r.photos?.length>0&&<B color="gray">📸{r.photos.length}</B>}
               {nbCli>0&&<B color="green">👥 {nbCli}</B>}
@@ -913,6 +1007,122 @@ export default function App(){
     </div>);
   };
 
+  // ========== MESSAGES (Tech) ==========
+  const MessagesPg=()=>{
+    // Tech: sees rejection messages | Manager: sees pending CRs + resubmission notifications
+    const markRead=async(id)=>{
+      supabase.from("messages").update({read:true}).eq("id",id);
+      setMessages(prev=>prev.map(m=>m.id===id?{...m,read:true}:m));
+    };
+
+    if(isT){
+      const myMsgs=messages.filter(m=>m.tech_name===tName&&m.type==="rejection");
+      const markAllRead=async()=>{
+        const ids=myMsgs.filter(m=>!m.read).map(m=>m.id);
+        if(ids.length===0)return;
+        supabase.from("messages").update({read:true}).in("id",ids);
+        setMessages(prev=>prev.map(m=>ids.includes(m.id)?{...m,read:true}:m));
+      };
+      return(<div style={{padding:16,maxWidth:600}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800}}>💬 Messages</h2>
+          {myMsgs.some(m=>!m.read)&&<button onClick={markAllRead} style={{...b2,padding:"5px 12px",fontSize:10}}>Tout marquer comme lu</button>}
+        </div>
+        {myMsgs.length===0?<div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>📭</div><h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginTop:12}}>Aucun message</h3><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>Les renvois du manager apparaîtront ici.</p></div>
+        :myMsgs.map(m=>{
+          const dateStr=m.created_at?new Date(m.created_at).toLocaleDateString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+          const relatedCR=reps.find(r=>r.id==m.report_id);
+          return(<div key={m.id} style={{...crd,borderLeft:`4px solid ${m.read?"#d1d5db":"#dc2626"}`,background:m.read?"#fff":"#fef2f2",cursor:"pointer"}} onClick={()=>{if(!m.read)markRead(m.id);if(relatedCR){setViewR(relatedCR);setPg("hist");}}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                {!m.read&&<span style={{width:8,height:8,borderRadius:"50%",background:"#dc2626",flexShrink:0}}/>}
+                <span style={{fontFamily:"monospace",fontSize:12,fontWeight:800,color:CL.dk}}>{m.pm_code}</span>
+                <B color="red">🔄 Renvoyé</B>
+              </div>
+              <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>{dateStr}</span>
+            </div>
+            <div style={{fontFamily:F,fontSize:12,color:"#b91c1c",marginTop:4,whiteSpace:"pre-wrap"}}>{m.message}</div>
+            <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:6}}>Cliquer pour voir et corriger le CR</div>
+          </div>);
+        })}
+      </div>);
+    }
+
+    // ========== MANAGER VIEW ==========
+    const pendingCRs=reps.filter(r=>r.validation==="pending");
+    const resubMsgs=messages.filter(m=>m.type==="resubmission");
+    const rejectionsSent=messages.filter(m=>m.type==="rejection");
+    const markAllMgrRead=async()=>{
+      const ids=resubMsgs.filter(m=>!m.read).map(m=>m.id);
+      if(ids.length===0)return;
+      supabase.from("messages").update({read:true}).in("id",ids);
+      setMessages(prev=>prev.map(m=>ids.includes(m.id)?{...m,read:true}:m));
+    };
+
+    return(<div style={{padding:16,maxWidth:700}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800}}>💬 Suivi CR</h2>
+        {resubMsgs.some(m=>!m.read)&&<button onClick={markAllMgrRead} style={{...b2,padding:"5px 12px",fontSize:10}}>Tout marquer comme lu</button>}
+      </div>
+
+      {pendingCRs.length>0&&<div style={{marginBottom:16}}>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#92400e",marginBottom:8}}>🟡 CR en attente de validation ({pendingCRs.length})</h3>
+        {pendingCRs.map(r=>{
+          const pmCode=r.pmCode||r.pm_code||"";const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR"):"";
+          return(<div key={r.id} style={{...crd,borderLeft:"4px solid #f59e0b",cursor:"pointer"}} onClick={()=>{setViewR(r);setPg("hist");}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{pmCode}</span><B color="orange">🟡 En attente</B></div>
+              <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>{dateStr}</span>
+            </div>
+            <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:3}}>👷 {r.tech||"?"} — Cliquer pour valider ou renvoyer</div>
+          </div>);
+        })}
+      </div>}
+
+      {resubMsgs.length>0&&<div style={{marginBottom:16}}>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#1e40af",marginBottom:8}}>🔄 CR ressoumis après correction ({resubMsgs.length})</h3>
+        {resubMsgs.map(m=>{
+          const dateStr=m.created_at?new Date(m.created_at).toLocaleDateString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+          const relatedCR=reps.find(r=>r.id==m.report_id);
+          return(<div key={m.id} style={{...crd,borderLeft:`4px solid ${m.read?"#93c5fd":"#1e40af"}`,background:m.read?"#fff":"#eff6ff",cursor:"pointer"}} onClick={()=>{if(!m.read)markRead(m.id);if(relatedCR){setViewR(relatedCR);setPg("hist");}}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                {!m.read&&<span style={{width:8,height:8,borderRadius:"50%",background:"#1e40af",flexShrink:0}}/>}
+                <span style={{fontFamily:"monospace",fontSize:12,fontWeight:800,color:CL.dk}}>{m.pm_code}</span>
+                <B color="blue">✏️ Corrigé</B>
+              </div>
+              <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>{dateStr}</span>
+            </div>
+            <div style={{fontFamily:F,fontSize:11,color:"#1e40af",marginTop:4}}>{m.message}</div>
+            <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:4}}>Cliquer pour revalider le CR</div>
+          </div>);
+        })}
+      </div>}
+
+      {rejectionsSent.length>0&&<div>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:CL.sb,marginBottom:8}}>📤 Renvois envoyés ({rejectionsSent.length})</h3>
+        {rejectionsSent.slice(0,20).map(m=>{
+          const dateStr=m.created_at?new Date(m.created_at).toLocaleDateString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+          const relatedCR=reps.find(r=>r.id==m.report_id);
+          const crStatus=relatedCR?.validation||"?";
+          return(<div key={m.id} style={{...crd,borderLeft:"4px solid #d1d5db",opacity:crStatus==="validated"?.6:1}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                <span style={{fontFamily:"monospace",fontSize:11,fontWeight:700,color:CL.dk}}>{m.pm_code}</span>
+                <span style={{fontFamily:F,fontSize:10,color:CL.sb}}>→ {m.tech_name}</span>
+                <B color={crStatus==="validated"?"green":crStatus==="pending"?"orange":"red"}>{crStatus==="validated"?"✅ Validé":crStatus==="pending"?"🟡 En attente":"🔄 Rejeté"}</B>
+              </div>
+              <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>{dateStr}</span>
+            </div>
+            <div style={{fontFamily:F,fontSize:10,color:"#b91c1c",marginTop:3}}>{m.message}</div>
+          </div>);
+        })}
+      </div>}
+
+      {pendingCRs.length===0&&resubMsgs.length===0&&rejectionsSent.length===0&&<div style={{textAlign:"center",padding:50}}><div style={{fontSize:50}}>✅</div><h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginTop:12}}>Tout est à jour</h3><p style={{fontFamily:F,color:CL.sb,marginTop:8}}>Aucun CR en attente.</p></div>}
+    </div>);
+  };
+
   // ========== ROUTE / TOURNÉE ==========
   const RoutePg=()=>{
     const techsWithPms=isM?[...new Set(Object.values(assigns).map(a=>a.tech).filter(Boolean))]:[];
@@ -971,7 +1181,14 @@ export default function App(){
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="route"&&RoutePg()}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="messages"&&MessagesPg()}{pg==="route"&&RoutePg()}
+    {showReject&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowReject(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:440,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+      <h3 style={{fontFamily:F,color:"#dc2626",fontSize:14,fontWeight:800,marginBottom:12}}>🔄 Renvoyer le CR — {showReject.pmCode||showReject.pm_code}</h3>
+      <div style={{...lbl,marginBottom:6}}>Motifs prédéfinis</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:12}}>{REJECT_MSGS.map(m=><button key={m} onClick={()=>setRejectPresets(p=>p.includes(m)?p.filter(x=>x!==m):[...p,m])} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${rejectPresets.includes(m)?"#dc2626":CL.bd}`,background:rejectPresets.includes(m)?"#fee2e2":"#fff",color:rejectPresets.includes(m)?"#dc2626":CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{rejectPresets.includes(m)?"✓ ":""}{m}</button>)}</div>
+      <div style={{marginBottom:12}}><label style={lbl}>Message personnalisé</label><textarea value={rejectCustom} onChange={e=>setRejectCustom(e.target.value)} rows={3} placeholder="Détails supplémentaires..." style={{...inp,resize:"vertical",fontSize:12}}/></div>
+      <div style={{display:"flex",gap:8}}><button onClick={()=>rejectCR(showReject)} style={{...b1,background:"#dc2626",flex:1}}>🔄 Envoyer le renvoi</button><button onClick={()=>setShowReject(null)} style={{...b2,flex:1}}>Annuler</button></div>
+    </div></div>)}
     {Lightbox()}
     {toast&&<div onClick={()=>setToast(null)} style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:"#1e40af",color:"#fff",fontFamily:F,fontSize:13,fontWeight:700,padding:"14px 24px",borderRadius:12,boxShadow:"0 8px 32px rgba(0,0,0,.25)",zIndex:9998,cursor:"pointer",maxWidth:"90vw",textAlign:"center",animation:"slideDown .4s ease"}}><style>{`@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-20px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}`}</style>🔔 {toast.message}</div>}
   </div>);
