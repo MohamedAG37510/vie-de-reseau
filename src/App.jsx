@@ -128,16 +128,18 @@ export default function App(){
 
   const insertReport=async(r)=>{
     const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[]};
-    // Optimistic: add to local state immediately
+    const{error}=await supabase.from("reports").insert(row);
+    if(error){alert("❌ Erreur lors de l'enregistrement du CR : "+error.message);console.error("Insert report error:",error);return false;}
     setReps(prev=>[{...row,...r,pmCode:r.pmCode,pmAdresse:r.pmAdresse,pmDept:r.pmDept,nbCli:r.nbCli,suiviTxt:r.suiviTxt,validation:"pending"},...prev]);
-    supabase.from("reports").insert(row);
+    return true;
   };
 
   const updateReport=async(r)=>{
     const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
-    // Optimistic update
+    const{error}=await supabase.from("reports").update(updates).eq("id",r.id);
+    if(error){alert("❌ Erreur lors de la mise à jour du CR : "+error.message);return false;}
     setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,...updates,nbCli:r.nbCli,suiviTxt:r.suiviTxt,types:r.types,probs:r.probs,etat:r.etat,iwResults:r.iwResults}:rep));
-    supabase.from("reports").update(updates).eq("id",r.id);
+    return true;
   };
 
   const delR=async(id)=>{
@@ -433,7 +435,8 @@ export default function App(){
   const submitCR=async()=>{
     if(editingR){
       // Re-submitting after rejection or editing → reset to pending
-      await updateReport({...form,id:editingR.id});
+      const ok=await updateReport({...form,id:editingR.id});
+      if(!ok)return;
       setReps(prev=>prev.map(rep=>rep.id===editingR.id?{...rep,validation:"pending",rejection_msg:null}:rep));
       await supabase.from("reports").update({validation:"pending",rejection_msg:null}).eq("id",editingR.id);
       // Notify manager that tech has resubmitted
@@ -451,8 +454,9 @@ export default function App(){
       setEditingR(null);setPg("hist");
     }else{
       const r={...form,id:Date.now(),created:new Date().toISOString()};
-      await insertReport(r);
-      // Optimistic: mark PM as pending validation
+      const ok=await insertReport(r);
+      if(!ok)return; // Don't mark PM if insert failed
+      // Mark PM as pending validation
       const now=new Date().toISOString();
       setPms(prev=>prev.map(p=>p.code===form.pmCode?{...p,resolved:true,resolved_at:now,resolved_reason:"pending_validation"}:p));
       await Promise.all([
