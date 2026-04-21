@@ -435,17 +435,18 @@ export default function App(){
       // Re-submitting after rejection or editing → reset to pending
       await updateReport({...form,id:editingR.id});
       setReps(prev=>prev.map(rep=>rep.id===editingR.id?{...rep,validation:"pending",rejection_msg:null}:rep));
-      supabase.from("reports").update({validation:"pending",rejection_msg:null}).eq("id",editingR.id);
+      await supabase.from("reports").update({validation:"pending",rejection_msg:null}).eq("id",editingR.id);
       // Notify manager that tech has resubmitted
       if(editingR.validation==="rejected"){
         const msgId=`msg_${Date.now()}_resub`;
         const techN=form.tech||tName;
         const pmC=form.pmCode;
-        supabase.from("messages").insert({id:msgId,tech_name:techN,pm_code:pmC,report_id:editingR.id,type:"resubmission",message:`CR corrigé et ressoumis par ${techN} pour ${pmC}`,read:false});
         setMessages(prev=>[{id:msgId,tech_name:techN,pm_code:pmC,report_id:editingR.id,type:"resubmission",message:`CR corrigé et ressoumis par ${techN} pour ${pmC}`,read:false,created_at:new Date().toISOString()},...prev]);
-        // Re-mark PM as pending validation
         setPms(prev=>prev.map(p=>p.code===pmC?{...p,resolved:true,resolved_reason:"pending_validation"}:p));
-        supabase.from("pms").update({resolved:true,resolved_reason:"pending_validation"}).eq("code",pmC);
+        await Promise.all([
+          supabase.from("messages").insert({id:msgId,tech_name:techN,pm_code:pmC,report_id:editingR.id,type:"resubmission",message:`CR corrigé et ressoumis par ${techN} pour ${pmC}`,read:false}),
+          supabase.from("pms").update({resolved:true,resolved_reason:"pending_validation"}).eq("code",pmC),
+        ]);
       }
       setEditingR(null);setPg("hist");
     }else{
@@ -454,8 +455,10 @@ export default function App(){
       // Optimistic: mark PM as pending validation
       const now=new Date().toISOString();
       setPms(prev=>prev.map(p=>p.code===form.pmCode?{...p,resolved:true,resolved_at:now,resolved_reason:"pending_validation"}:p));
-      supabase.from("reports").update({validation:"pending"}).eq("id",r.id);
-      supabase.from("pms").update({resolved:true,resolved_at:now,resolved_reason:"pending_validation"}).eq("code",form.pmCode);
+      await Promise.all([
+        supabase.from("reports").update({validation:"pending"}).eq("id",r.id),
+        supabase.from("pms").update({resolved:true,resolved_at:now,resolved_reason:"pending_validation"}).eq("code",form.pmCode),
+      ]);
       setPg("ok");
     }
   };
@@ -468,10 +471,12 @@ export default function App(){
     setPms(prev=>prev.map(p=>p.code===pmCode?{...p,resolved:true,resolved_reason:"cr_done"}:p));
     setAssigns(prev=>{const na={...prev};delete na[pmCode];return na;});
     setViewR(null);
-    // Fire Supabase writes (no await needed for UI)
-    supabase.from("reports").update({validation:"validated"}).eq("id",r.id);
-    supabase.from("pms").update({resolved_reason:"cr_done"}).eq("code",pmCode);
-    supabase.from("assignments").delete().eq("pm_code",pmCode);
+    // Await Supabase writes to ensure they complete before realtime reloads
+    await Promise.all([
+      supabase.from("reports").update({validation:"validated"}).eq("id",r.id),
+      supabase.from("pms").update({resolved_reason:"cr_done"}).eq("code",pmCode),
+      supabase.from("assignments").delete().eq("pm_code",pmCode),
+    ]);
   };
 
   const rejectCR=async(r)=>{
@@ -485,10 +490,12 @@ export default function App(){
     setMessages(prev=>[{id:msgId,tech_name:r.tech,pm_code:pmCode,report_id:r.id,type:"rejection",message:msg,read:false,created_at:new Date().toISOString()},...prev]);
     setShowReject(null);setRejectPresets([]);setRejectCustom("");
     setViewR(null);
-    // Fire Supabase writes
-    supabase.from("reports").update({validation:"rejected",rejection_msg:msg}).eq("id",r.id);
-    supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",pmCode);
-    supabase.from("messages").insert({id:msgId,tech_name:r.tech,pm_code:pmCode,report_id:r.id,type:"rejection",message:msg,read:false});
+    // Await Supabase writes
+    await Promise.all([
+      supabase.from("reports").update({validation:"rejected",rejection_msg:msg}).eq("id",r.id),
+      supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",pmCode),
+      supabase.from("messages").insert({id:msgId,tech_name:r.tech,pm_code:pmCode,report_id:r.id,type:"rejection",message:msg,read:false}),
+    ]);
   };
 
   // ========== LIGHTBOX ==========
