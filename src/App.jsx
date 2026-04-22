@@ -69,6 +69,49 @@ export default function App(){
   // Persist session across page reloads
   useEffect(()=>{try{if(user)sessionStorage.setItem("vdr_user",JSON.stringify(user));else sessionStorage.removeItem("vdr_user");}catch{}},[user]);
 
+  // Compress photo to small thumbnail for draft storage
+  const compressPhoto=(dataUrl,maxW=200)=>new Promise(resolve=>{
+    try{
+      const img=new window.Image();img.onload=()=>{
+        const c=document.createElement("canvas");
+        const scale=Math.min(maxW/img.width,maxW/img.height,1);
+        c.width=img.width*scale;c.height=img.height*scale;
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        resolve(c.toDataURL("image/jpeg",0.4));
+      };img.onerror=()=>resolve(null);img.src=dataUrl;
+    }catch{resolve(null);}
+  });
+
+  // Auto-save CR form draft with compressed photos
+  useEffect(()=>{
+    if(!form||pg!=="form")return;
+    const saveDraft=async()=>{
+      try{
+        // Compress photos for draft storage
+        let draftPhotos=[];
+        if(form.photos?.length>0){
+          const compressed=await Promise.all(form.photos.map(async p=>({label:p.label||"",data:await compressPhoto(p.data)||""})));
+          draftPhotos=compressed.filter(p=>p.data);
+        }
+        const draft={...form,photos:draftPhotos,_photoCount:form.photos?.length||0};
+        sessionStorage.setItem("vdr_draft",JSON.stringify(draft));
+        if(selPM)sessionStorage.setItem("vdr_draft_pm",JSON.stringify(selPM));
+      }catch(e){
+        // If storage is full even with compressed photos, save without photos
+        try{
+          const draft={...form,photos:[],_photoCount:form.photos?.length||0};
+          sessionStorage.setItem("vdr_draft",JSON.stringify(draft));
+        }catch{}
+      }
+    };
+    const timer=setTimeout(saveDraft,500); // debounce
+    return()=>clearTimeout(timer);
+  },[form,pg,selPM]);
+
+  // Clear draft on successful submit or cancel
+  const clearDraft=()=>{try{sessionStorage.removeItem("vdr_draft");sessionStorage.removeItem("vdr_draft_pm");}catch{}};
+  const hasDraft=(pmCode)=>{try{const d=sessionStorage.getItem("vdr_draft");if(!d)return false;const p=JSON.parse(d);return p.pmCode===pmCode;}catch{return false;}};
+
   // ========== SUPABASE DATA LOADING ==========
   const loadAll = useCallback(async()=>{
     try{
@@ -358,7 +401,18 @@ export default function App(){
     reader.readAsText(file);e.target.value="";
   };
 
-  const handlePhotos=e=>{Array.from(e.target.files).forEach(f=>{const rd=new FileReader();rd.onload=ev=>setForm(fm=>({...fm,photos:[...(fm.photos||[]),{name:f.name,data:ev.target.result,label:""}]}));rd.readAsDataURL(f);});e.target.value="";};
+  // Compress photo for storage (1200px max, JPEG 60%)
+  const compressForStorage=(dataUrl,maxW=1200)=>new Promise(resolve=>{
+    const img=new window.Image();img.onload=()=>{
+      const c=document.createElement("canvas");
+      const scale=Math.min(maxW/img.width,maxW/img.height,1);
+      c.width=img.width*scale;c.height=img.height*scale;
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      resolve(c.toDataURL("image/jpeg",0.6));
+    };img.onerror=()=>resolve(dataUrl);img.src=dataUrl;
+  });
+
+  const handlePhotos=e=>{Array.from(e.target.files).forEach(f=>{const rd=new FileReader();rd.onload=async ev=>{const compressed=await compressForStorage(ev.target.result);setForm(fm=>({...fm,photos:[...(fm.photos||[]),{name:f.name,data:compressed,label:""}]}));};rd.readAsDataURL(f);});e.target.value="";};
   const toggleArr=(field,val)=>setForm(f=>({...f,[field]:f[field].includes(val)?f[field].filter(v=>v!==val):[...f[field],val]}));
 
   // ========== NAVIGATION & ROUTE ==========
@@ -416,6 +470,27 @@ export default function App(){
   const repsFor=code=>myReps.filter(r=>r.pmCode===code);
 
   const startCR=pm=>{
+    // Check for saved draft on this PM
+    try{
+      const draftStr=sessionStorage.getItem("vdr_draft");
+      if(draftStr){
+        const draft=JSON.parse(draftStr);
+        if(draft.pmCode===pm.code){
+          // Restore draft — re-attach IW results from current IW items (manager may have updated)
+          const pmIws=iwForPM(pm.code);
+          const freshIW=pmIws.map(iw=>{
+            const saved=(draft.iwResults||[]).find(d=>d.id===iw.id);
+            return saved||{id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""};
+          });
+          setSelPM(pm);setForm({...draft,iwResults:freshIW,photos:draft.photos||[]});setPg("form");
+          if(draft._photoCount>0&&(!draft.photos||draft.photos.length===0)){
+            setTimeout(()=>alert(`ℹ️ Brouillon restauré.\n${draft._photoCount} photo(s) non sauvegardée(s) — veuillez les reprendre.`),300);
+          }
+          return;
+        }
+      }
+    }catch{}
+    // No draft — start fresh
     const pmIws=iwForPM(pm.code);
     const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""}));
     const assInfo=assigns[pm.code]||{};
@@ -455,7 +530,7 @@ export default function App(){
           supabase.from("pms").update({resolved:true,resolved_reason:"pending_validation"}).eq("code",pmC),
         ]);
       }
-      setEditingR(null);setPg("hist");
+      clearDraft();setEditingR(null);setPg("hist");
     }else{
       const r={...form,id:Date.now(),created:new Date().toISOString()};
       const ok=await insertReport(r);
@@ -467,7 +542,7 @@ export default function App(){
         supabase.from("reports").update({validation:"pending"}).eq("id",r.id),
         supabase.from("pms").update({resolved:true,resolved_at:now,resolved_reason:"pending_validation"}).eq("code",form.pmCode),
       ]);
-      setPg("ok");
+      clearDraft();setPg("ok");
     }
     }finally{setSubmitting(false);}
   };
@@ -672,7 +747,7 @@ export default function App(){
             <div style={{textAlign:"center"}}><B color={pC(pm.nbIW)}>{pL(pm.nbIW)}</B></div>
             {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?.tech?<><B color="purple">{assigns[pm.code].tech}</B><button onClick={()=>{setShowAss(pm.code);setAssTypes(assigns[pm.code]?.types||[]);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>{setShowAss(pm.code);setAssTypes([]);}} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
             <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
-              <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9}}>+CR</button>
+              <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9,position:"relative"}}>{hasDraft(pm.code)?"📝 Reprendre":"+CR"}</button>
               {isM&&<button onClick={()=>{setShowIWPanel(pm.code);setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);}} style={{...b2,padding:"2px 5px",fontSize:8,color:iwForPM(pm.code).length>0?"#059669":"#7c3aed",borderColor:iwForPM(pm.code).length>0?"#86efac":"#c4b5fd"}}>{iwForPM(pm.code).length>0?`📋${iwForPM(pm.code).length}`:"📋+"}</button>}
               {pm.lat?<button onClick={()=>openWaze(pm.lat,pm.lng)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#33ccff",borderColor:"#33ccff"}}>📍</button>
               :<button onClick={()=>openMapsAddr(pm.adresse)} style={{...b2,padding:"2px 5px",fontSize:8}}>📍</button>}
@@ -744,7 +819,10 @@ export default function App(){
     const ok=form.tech&&form.types.length>0&&form.etat&&form.obs;
     const isEdit=!!editingR;
     return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
-      <button onClick={()=>{setPg(isEdit?"hist":"dash");if(isEdit)setEditingR(null);}} style={{...b2,marginBottom:12,fontSize:11}}>← {isEdit?"Retour au CR":"Retour"}</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <button onClick={()=>{setPg(isEdit?"hist":"dash");if(isEdit)setEditingR(null);}} style={{...b2,fontSize:11}}>← {isEdit?"Retour au CR":"Retour"}</button>
+        {!isEdit&&<div style={{fontFamily:F,fontSize:10,color:GREEN,fontWeight:600}}>💾 Brouillon sauvegardé</div>}
+      </div>
       {isEdit&&<div style={{background:"#dbeafe",border:"1.5px solid #3b82f6",borderRadius:8,padding:10,marginBottom:12,fontFamily:F,fontSize:12,color:"#1e40af",fontWeight:700}}>✏️ Modification du CR-{editingR.id}</div>}
       <div style={{...crd,borderLeft:`4px solid ${isEdit?"#3b82f6":CL.a}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div><div style={{fontFamily:F,fontWeight:800,fontSize:16,color:CL.dk}}>{form.pmCode}</div><div style={{fontFamily:F,fontSize:11,color:CL.sb,marginTop:2}}>{form.pmAdresse}</div></div>
@@ -808,7 +886,7 @@ export default function App(){
         {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} onClick={()=>openLightbox(form.photos,i)} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} title="Cliquer pour agrandir"/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginBottom:30}}>
-        <button onClick={()=>{if(isEdit){setEditingR(null);setPg("hist");}else setPg("dash");}} style={b2}>Annuler</button>
+        <button onClick={()=>{if(isEdit){setEditingR(null);setPg("hist");}else if(window.confirm("Abandonner ce CR ? Le brouillon sera supprimé.")){clearDraft();setForm(null);setPg("dash");}else{setPg("dash");}}} style={b2}>{isEdit?"Annuler":"🗑️ Abandonner"}</button>
         <button onClick={submitCR} disabled={!ok||submitting} style={{...b1,opacity:ok&&!submitting?1:.4,cursor:ok&&!submitting?"pointer":"not-allowed",padding:"10px 24px",fontSize:14,background:isEdit?"#1e40af":CL.a}}>{submitting?"⏳ Envoi en cours...":(isEdit?"💾 Enregistrer les modifications":"✅ Valider")}</button>
       </div>
     </div>);
