@@ -125,12 +125,13 @@ export default function App(){
         supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
         supabase.from("messages").select("*").order("created_at",{ascending:false}),
       ]);
-      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
-      if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
-      if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
-      if(assData){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
+      // Only update state if data is valid (not null/undefined) — prevents flash
+      if(pmData&&pmData.length>=0) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
+      if(techData&&techData.length>=0){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
+      if(repData&&repData.length>=0) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
+      if(assData&&assData.length>=0){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
       if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
-      if(iwData) setIwItems(iwData);
+      if(iwData&&iwData.length>=0) setIwItems(iwData);
       if(notifData) setNotifications(notifData);
       if(msgData) setMessages(msgData);
     }catch(e){console.error("Load error:",e);}
@@ -141,6 +142,8 @@ export default function App(){
 
   // Realtime subscriptions - only on tables that need it, with long debounce
   const typingRef=useRef(false);
+  const pgRef=useRef(pg);
+  useEffect(()=>{pgRef.current=pg;},[pg]);
   const typingTimer=useRef(null);
   useEffect(()=>{
     const onFocusIn=(e)=>{if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'){typingRef.current=true;clearTimeout(typingTimer.current);}};
@@ -151,7 +154,7 @@ export default function App(){
   },[]);
   useEffect(()=>{
     let timer=null;
-    const debouncedLoad=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!typingRef.current)loadAll();},2000);};
+    const debouncedLoad=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!typingRef.current&&pgRef.current!=="form")loadAll();},3000);};
     const ch = supabase.channel("all-changes")
       .on("postgres_changes",{event:"*",schema:"public",table:"pms"},debouncedLoad)
       .on("postgres_changes",{event:"*",schema:"public",table:"reports"},debouncedLoad)
