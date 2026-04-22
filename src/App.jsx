@@ -134,8 +134,13 @@ export default function App(){
       if(iwData&&iwData.length>=0) setIwItems(iwData);
       if(notifData) setNotifications(notifData);
       if(msgData) setMessages(msgData);
-    }catch(e){console.error("Load error:",e);}
-    setLoading(false);
+      // Only stop loading when we have valid data
+      if(techData&&cfgData) setLoading(false);
+    }catch(e){
+      console.error("Load error:",e);
+      // Even on error, stop loading after 10s to avoid infinite spinner
+      setTimeout(()=>setLoading(false),2000);
+    }
   },[]);
 
   useEffect(()=>{loadAll();},[loadAll]);
@@ -666,7 +671,13 @@ export default function App(){
   if(loading) return (
     <div style={{fontFamily:F,background:CL.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-      <div style={{textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>⚡</div><div style={{fontFamily:F,fontSize:14,color:CL.sb}}>Chargement...</div></div>
+      <div style={{textAlign:"center"}}>
+        <div style={{width:64,height:64,borderRadius:"50%",background:CL.dk,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><Logo/></div>
+        <h1 style={{fontFamily:F,fontSize:20,fontWeight:800,color:CL.dk,marginBottom:8}}>VIE DE RÉSEAU</h1>
+        <div style={{fontFamily:F,fontSize:12,color:CL.sb}}>Connexion à la base de données...</div>
+        <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
+        <div style={{marginTop:16,width:40,height:4,borderRadius:2,background:CL.a,margin:"16px auto 0",animation:"pulse 1.5s ease infinite"}}/>
+      </div>
     </div>
   );
 
