@@ -54,6 +54,7 @@ export default function App(){
   const [iwEditId,setIwEditId]=useState(null);
   const [lightbox,setLightbox]=useState(null);
   const [editingR,setEditingR]=useState(null); // report being edited or null
+  const [submitting,setSubmitting]=useState(false); // lock for CR submission
   const [notifications,setNotifications]=useState([]);
   const [toast,setToast]=useState(null);
   const [fTech,setFTech]=useState("all"); // tech filter on dashboard
@@ -433,6 +434,9 @@ export default function App(){
     setViewR(null);setPg("form");
   };
   const submitCR=async()=>{
+    if(submitting)return; // Prevent double-click
+    setSubmitting(true);
+    try{
     if(editingR){
       // Re-submitting after rejection or editing → reset to pending
       const ok=await updateReport({...form,id:editingR.id});
@@ -465,6 +469,7 @@ export default function App(){
       ]);
       setPg("ok");
     }
+    }finally{setSubmitting(false);}
   };
 
   // ========== VALIDATION (Manager) ==========
@@ -798,13 +803,13 @@ export default function App(){
         })}
       </div>}
       <div style={crd}><h3 style={sT}>📸 Photos</h3>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple onChange={handlePhotos} style={{display:"none"}}/>
+        <input ref={fileRef} type="file" accept="image/*" multiple onChange={handlePhotos} style={{display:"none"}}/>
         <button onClick={()=>fileRef.current?.click()} style={{...b1,background:"#fff",color:CL.a,border:`2px dashed ${CL.a}`,width:"100%",padding:14,marginBottom:10,fontSize:12}}>📷 Prendre / ajouter photos</button>
         {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} onClick={()=>openLightbox(form.photos,i)} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} title="Cliquer pour agrandir"/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
       </div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginBottom:30}}>
         <button onClick={()=>{if(isEdit){setEditingR(null);setPg("hist");}else setPg("dash");}} style={b2}>Annuler</button>
-        <button onClick={submitCR} disabled={!ok} style={{...b1,opacity:ok?1:.4,cursor:ok?"pointer":"not-allowed",padding:"10px 24px",fontSize:14,background:isEdit?"#1e40af":CL.a}}>{isEdit?"💾 Enregistrer les modifications":"✅ Valider"}</button>
+        <button onClick={submitCR} disabled={!ok||submitting} style={{...b1,opacity:ok&&!submitting?1:.4,cursor:ok&&!submitting?"pointer":"not-allowed",padding:"10px 24px",fontSize:14,background:isEdit?"#1e40af":CL.a}}>{submitting?"⏳ Envoi en cours...":(isEdit?"💾 Enregistrer les modifications":"✅ Valider")}</button>
       </div>
     </div>);
   };
