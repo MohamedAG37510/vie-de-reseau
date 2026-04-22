@@ -174,15 +174,25 @@ export default function App(){
   const saveR=async(allReps)=>{setReps(allReps);};
 
   const insertReport=async(r)=>{
-    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[]};
+    // Compress all photos before sending to Supabase
+    let photos=r.photos||[];
+    if(photos.length>0){
+      photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));
+    }
+    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,iw_results:r.iwResults||[]};
     const{error}=await supabase.from("reports").insert(row);
     if(error){alert("❌ Erreur lors de l'enregistrement du CR : "+error.message);console.error("Insert report error:",error);return false;}
-    setReps(prev=>[{...row,...r,pmCode:r.pmCode,pmAdresse:r.pmAdresse,pmDept:r.pmDept,nbCli:r.nbCli,suiviTxt:r.suiviTxt,validation:"pending"},...prev]);
+    setReps(prev=>[{...row,...r,pmCode:r.pmCode,pmAdresse:r.pmAdresse,pmDept:r.pmDept,nbCli:r.nbCli,suiviTxt:r.suiviTxt,validation:"pending",photos},...prev]);
     return true;
   };
 
   const updateReport=async(r)=>{
-    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos:r.photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
+    // Compress all photos before sending to Supabase
+    let photos=r.photos||[];
+    if(photos.length>0){
+      photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));
+    }
+    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
     const{error}=await supabase.from("reports").update(updates).eq("id",r.id);
     if(error){alert("❌ Erreur lors de la mise à jour du CR : "+error.message);return false;}
     setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,...updates,nbCli:r.nbCli,suiviTxt:r.suiviTxt,types:r.types,probs:r.probs,etat:r.etat,iwResults:r.iwResults}:rep));
