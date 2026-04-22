@@ -845,7 +845,7 @@ export default function App(){
     return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
         <button onClick={()=>{setPg(isEdit?"hist":"dash");if(isEdit)setEditingR(null);}} style={{...b2,fontSize:11}}>← {isEdit?"Retour au CR":"Retour"}</button>
-        {!isEdit&&<div style={{fontFamily:F,fontSize:10,color:GREEN,fontWeight:600}}>💾 Brouillon sauvegardé</div>}
+        {!isEdit&&<div style={{fontFamily:F,fontSize:10,color:"#059669",fontWeight:600}}>💾 Brouillon sauvegardé</div>}
       </div>
       {isEdit&&<div style={{background:"#dbeafe",border:"1.5px solid #3b82f6",borderRadius:8,padding:10,marginBottom:12,fontFamily:F,fontSize:12,color:"#1e40af",fontWeight:700}}>✏️ Modification du CR-{editingR.id}</div>}
       <div style={{...crd,borderLeft:`4px solid ${isEdit?"#3b82f6":CL.a}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
