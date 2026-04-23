@@ -882,9 +882,14 @@ export default function App(){
       <div style={crd}><h3 style={sT}>📋 Infos</h3>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
           <div><label style={lbl}>Date{isEdit?" (verrouillé)":" *"}</label>{isEdit?<div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.date}</div>:<input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>}</div>
-          <div><label style={lbl}>Arrivée *</label><div style={{display:"flex",gap:4}}><input type="time" value={form.h1} onChange={e=>setForm(f=>({...f,h1:e.target.value}))} style={{...inp,flex:1}}/>{!isEdit&&!form.h1&&<button onClick={()=>setForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"4px 8px",fontSize:9,whiteSpace:"nowrap"}}>▶ Début</button>}</div></div>
-          <div><label style={lbl}>Départ *</label><div style={{display:"flex",gap:4}}><input type="time" value={form.h2} onChange={e=>setForm(f=>({...f,h2:e.target.value}))} style={{...inp,flex:1}}/>{!isEdit&&form.h1&&!form.h2&&<button onClick={()=>setForm(f=>({...f,h2:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"4px 8px",fontSize:9,background:"#dc2626",whiteSpace:"nowrap"}}>⏹ Fin</button>}</div></div>
+          <div><label style={lbl}>Arrivée *</label><div style={{...inp,background:form.h1?"#f0fdf4":"#f4f3ef",fontWeight:700,color:form.h1?"#059669":CL.sb}}>{form.h1||"—"}</div></div>
+          <div><label style={lbl}>Départ *</label><div style={{...inp,background:form.h2?"#fef2f2":"#f4f3ef",fontWeight:700,color:form.h2?"#dc2626":CL.sb}}>{form.h2||"—"}</div></div>
         </div>
+        {!isEdit&&!form.h1&&<div style={{textAlign:"center",padding:20}}>
+          <button onClick={()=>setForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#059669",boxShadow:"0 4px 16px rgba(5,150,105,.3)"}}>▶ Démarrer l'intervention</button>
+          <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:8}}>Cliquez pour enregistrer l'heure d'arrivée et commencer le CR</div>
+        </div>}
+        {(form.h1||isEdit)&&<>
         {isEdit?<div style={{marginBottom:12}}><label style={lbl}>Technicien (verrouillé)</label><div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.tech}</div></div>
         :isM?<div style={{marginBottom:12}}><label style={lbl}>Technicien *</label><select value={form.tech} onChange={e=>setForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">--</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>
         :<div style={{marginBottom:12}}><label style={lbl}>Technicien</label><div style={{...inp,background:"#f4f3ef",fontWeight:700}}>{tName}</div></div>}
@@ -895,8 +900,9 @@ export default function App(){
         <div><label style={lbl}>Clients rétablis</label><div style={{...inp,background:"#f0fdf4",fontWeight:700,color:"#059669",maxWidth:90,textAlign:"center"}}>{(form.iwResults||[]).filter(iw=>iw.etat_box==="OK").length}</div><div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:2}}>Calculé automatiquement (IW avec Box OK)</div></div>
         {isM&&<div style={{marginTop:12}}><label style={lbl}>🎫 Tickets Helpers</label><input value={form.tickets||""} onChange={e=>setForm(f=>({...f,tickets:e.target.value}))} placeholder="Réf. tickets (ex: TK-12345, TK-12346)" style={{...inp,fontSize:12}}/></div>}
         {isT&&form.tickets&&<div style={{marginTop:12}}><label style={lbl}>🎫 Tickets Helpers</label><div style={{...inp,background:"#f4f3ef",fontWeight:600,color:CL.dk}}>{form.tickets}</div></div>}
+      </>}
       </div>
-      <div style={crd}><h3 style={sT}>🔧 Technique</h3>
+      {(form.h1||isEdit)&&<><div style={crd}><h3 style={sT}>🔧 Technique</h3>
         <div style={{marginBottom:12}}><label style={lbl}>Observations *</label><textarea value={form.obs} onChange={e=>setForm(f=>({...f,obs:e.target.value}))} rows={3} style={{...inp,resize:"vertical"}}/></div>
         <div style={{marginBottom:12}}>
           <label style={lbl}>Mesures optiques</label>
@@ -951,10 +957,15 @@ export default function App(){
         <button onClick={()=>fileRef.current?.click()} style={{...b1,background:"#fff",color:CL.a,border:`2px dashed ${CL.a}`,width:"100%",padding:14,marginBottom:10,fontSize:12}}>📷 Prendre / ajouter photos</button>
         {form.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>{form.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} onClick={()=>openLightbox(form.photos,i)} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} title="Cliquer pour agrandir"/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><div style={{padding:3}}><input value={p.label} onChange={e=>{const ph=[...form.photos];ph[i]={...ph[i],label:e.target.value};setForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div></div>)}</div>}
       </div>
+      {!isEdit&&form.h1&&!form.h2&&<div style={{textAlign:"center",marginBottom:16}}>
+        <button onClick={()=>setForm(f=>({...f,h2:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#dc2626",boxShadow:"0 4px 16px rgba(220,38,38,.3)"}}>⏹ Fin d'intervention</button>
+        <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:8}}>Cliquez pour enregistrer l'heure de départ</div>
+      </div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginBottom:30}}>
         <button onClick={()=>{if(isEdit){setEditingR(null);setPg("hist");}else if(window.confirm("Abandonner ce CR ? Le brouillon sera supprimé.")){clearDraft();setForm(null);setPg("dash");}else{setPg("dash");}}} style={b2}>{isEdit?"Annuler":"🗑️ Abandonner"}</button>
         <button onClick={submitCR} disabled={!ok||submitting} style={{...b1,opacity:ok&&!submitting?1:.4,cursor:ok&&!submitting?"pointer":"not-allowed",padding:"10px 24px",fontSize:14,background:isEdit?"#1e40af":CL.a}}>{submitting?"⏳ Envoi en cours...":(isEdit?"💾 Enregistrer les modifications":"✅ Valider")}</button>
       </div>
+      </>}
     </div>);
   };
 
