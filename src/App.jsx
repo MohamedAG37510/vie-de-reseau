@@ -377,7 +377,7 @@ export default function App(){
       let sep="\t";if(hdr.includes(";"))sep=";";else if(!hdr.includes("\t")&&hdr.includes(","))sep=",";
       const cols=lines[0].split(sep).map(c=>c.trim().toLowerCase().replace(/['"]/g,""));
       const iC=cols.findIndex(c=>c.includes("code")&&c.includes("pm"));
-      const iD=cols.findIndex(c=>c.includes("départ")||c.includes("depart")||c.includes("dept")||(c.includes("code")&&c.includes("dep")));
+      const iD=cols.findIndex(c=>c.includes("départ")||c.includes("depart")||c.includes("dept")||c==="dpt"||(c.includes("code")&&c.includes("dep")));
       const iA=cols.findIndex(c=>c.includes("adresse"));
       const iN=cols.findIndex(c=>c.includes("nombre")||c.includes("intervention")||c.includes("iw"));
       if(iC===-1){setImpMsg("Colonne 'Code PM' non trouvée: "+cols.join(", "));return;}
