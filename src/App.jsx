@@ -58,6 +58,7 @@ export default function App(){
   const [notifications,setNotifications]=useState([]);
   const [toast,setToast]=useState(null);
   const [fTech,setFTech]=useState("all"); // tech filter on dashboard
+  const [fVille,setFVille]=useState("all"); // city filter on dashboard
   const [showReject,setShowReject]=useState(null); // report to reject
   const [rejectPresets,setRejectPresets]=useState([]);
   const [rejectCustom,setRejectCustom]=useState("");
@@ -184,7 +185,7 @@ export default function App(){
     if(photos.length>0){
       photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));
     }
-    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,iw_results:r.iwResults||[]};
+    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,tickets:r.tickets||"",iw_results:r.iwResults||[]};
     const{error}=await supabase.from("reports").insert(row);
     if(error){alert("❌ Erreur lors de l'enregistrement du CR : "+error.message);console.error("Insert report error:",error);return false;}
     setReps(prev=>[{...row,...r,pmCode:r.pmCode,pmAdresse:r.pmAdresse,pmDept:r.pmDept,nbCli:r.nbCli,suiviTxt:r.suiviTxt,validation:"pending",photos},...prev]);
@@ -197,7 +198,7 @@ export default function App(){
     if(photos.length>0){
       photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));
     }
-    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
+    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,tickets:r.tickets||"",iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
     const{error}=await supabase.from("reports").update(updates).eq("id",r.id);
     if(error){alert("❌ Erreur lors de la mise à jour du CR : "+error.message);return false;}
     setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,...updates,nbCli:r.nbCli,suiviTxt:r.suiviTxt,types:r.types,probs:r.probs,etat:r.etat,iwResults:r.iwResults}:rep));
@@ -476,13 +477,17 @@ export default function App(){
   const activePms=pms.filter(p=>!p.resolved);
   const resolvedPms=pms.filter(p=>p.resolved);
   const depts=[...new Set(activePms.map(p=>p.dept).filter(Boolean))].sort();
+  // Extract city from address (last word(s) after postal code)
+  const getVille=addr=>{if(!addr)return"";const m=addr.match(/\d{5}\s+(.+)$/i);return m?m[1].trim().toUpperCase():"";};
+  const villes=[...new Set(activePms.map(p=>getVille(p.adresse)).filter(Boolean))].sort();
   const myPms=isT?activePms.filter(pm=>assigns[pm.code]?.tech===tName):activePms;
   const filtered=myPms.filter(pm=>{
     const ms=pm.code.toLowerCase().includes(search.toLowerCase())||pm.adresse.toLowerCase().includes(search.toLowerCase());
     const md=fDept==="all"||pm.dept===fDept;
     const mi=fIW==="all"||(fIW==="10+"&&pm.nbIW>=10)||(fIW==="7-9"&&pm.nbIW>=7&&pm.nbIW<=9)||(fIW==="5-6"&&pm.nbIW>=5&&pm.nbIW<=6)||(fIW==="1-4"&&pm.nbIW>=1&&pm.nbIW<=4)||(fIW==="0"&&pm.nbIW===0);
     const mt=fTech==="all"||(fTech==="unassigned"?!assigns[pm.code]?.tech:assigns[pm.code]?.tech===fTech);
-    return ms&&md&&mi&&mt;
+    const mv=fVille==="all"||getVille(pm.adresse)===fVille;
+    return ms&&md&&mi&&mt&&mv;
   });
   const myReps=isT?reps.filter(r=>r.tech===tName):reps;
   const repsFor=code=>myReps.filter(r=>r.pmCode===code);
@@ -513,7 +518,7 @@ export default function App(){
     const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""}));
     const assInfo=assigns[pm.code]||{};
     const assignedTypes=assInfo.types||[];
-    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:[],actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",iwResults});setPg("form");
+    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:[],actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",tickets:"",iwResults});setPg("form");
   };
   const startEditCR=(r)=>{
     const pmCode=r.pmCode||r.pm_code||"";const pmAdresse=r.pmAdresse||r.pm_adresse||"";const pmDept=r.pmDept||r.pm_dept||"";
@@ -523,7 +528,7 @@ export default function App(){
     setSelPM(fakePM);setEditingR(r);
     let parsedMesures=[];
     try{if(typeof r.mesures==="string"&&r.mesures.startsWith("["))parsedMesures=JSON.parse(r.mesures);else if(typeof r.mesures==="string"&&r.mesures.trim())parsedMesures=[{coupleur:1,valeur:r.mesures}];else if(Array.isArray(r.mesures))parsedMesures=r.mesures;}catch{parsedMesures=r.mesures?[{coupleur:1,valeur:r.mesures}]:[];}
-    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:parsedMesures,actions:r.actions||"",materiel:r.materiel||"",obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,iwResults:iwRes});
+    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:parsedMesures,actions:r.actions||"",materiel:r.materiel||"",obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,tickets:r.tickets||"",iwResults:iwRes});
     setViewR(null);setPg("form");
   };
   const submitCR=async()=>{
@@ -756,6 +761,7 @@ export default function App(){
         <select value={fDept} onChange={e=>setFDept(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous depts</option>{depts.map(d=><option key={d} value={d}>{d}</option>)}</select>
         <select value={fIW} onChange={e=>setFIW(e.target.value)} style={{...inp,maxWidth:120,fontSize:13}}><option value="all">Tous IW</option><option value="10+">10+ (critique)</option><option value="7-9">7-9 (haute)</option><option value="5-6">5-6 (moyenne)</option><option value="1-4">1-4 (basse)</option><option value="0">0</option></select>
         {isM&&<select value={fTech} onChange={e=>setFTech(e.target.value)} style={{...inp,maxWidth:140,fontSize:13}}><option value="all">Tous techs</option><option value="unassigned">Non affectés</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select>}
+        {isM&&villes.length>0&&<select value={fVille} onChange={e=>setFVille(e.target.value)} style={{...inp,maxWidth:160,fontSize:13}}><option value="all">Toutes villes</option>{villes.map(v=><option key={v} value={v}>{v}</option>)}</select>}
         {isM&&Object.keys(assigns).length>0&&<button onClick={()=>{if(window.confirm("Supprimer toutes les affectations (techs + types) ?\nLes PM et CR sont conservés."))resetAssignments();}} style={{...b2,padding:"6px 12px",fontSize:10,color:"#c2410c",borderColor:"#fed7aa",marginLeft:"auto"}}>🔄 Réinitialiser les affectations</button>}
       </div>
       <div style={{...crd,padding:0,overflow:"hidden"}}>
@@ -840,7 +846,8 @@ export default function App(){
   // ========== FORM ==========
   const FormCR=()=>{
     if(!form)return null;
-    const ok=form.tech&&form.types.length>0&&form.etat&&form.obs;
+    const iwComplete=!form.iwResults||form.iwResults.length===0||form.iwResults.every(iw=>iw.status&&iw.etat_box);
+    const ok=form.tech&&form.types.length>0&&form.etat&&form.obs&&form.materiel&&form.h1&&form.h2&&iwComplete;
     const isEdit=!!editingR;
     return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -855,8 +862,8 @@ export default function App(){
       <div style={crd}><h3 style={sT}>📋 Infos</h3>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12}}>
           <div><label style={lbl}>Date{isEdit?" (verrouillé)":" *"}</label>{isEdit?<div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.date}</div>:<input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>}</div>
-          <div><label style={lbl}>Arrivée</label><input type="time" value={form.h1} onChange={e=>setForm(f=>({...f,h1:e.target.value}))} style={inp}/></div>
-          <div><label style={lbl}>Départ</label><input type="time" value={form.h2} onChange={e=>setForm(f=>({...f,h2:e.target.value}))} style={inp}/></div>
+          <div><label style={lbl}>Arrivée *</label><div style={{display:"flex",gap:4}}><input type="time" value={form.h1} onChange={e=>setForm(f=>({...f,h1:e.target.value}))} style={{...inp,flex:1}}/>{!isEdit&&!form.h1&&<button onClick={()=>setForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"4px 8px",fontSize:9,whiteSpace:"nowrap"}}>▶ Début</button>}</div></div>
+          <div><label style={lbl}>Départ *</label><div style={{display:"flex",gap:4}}><input type="time" value={form.h2} onChange={e=>setForm(f=>({...f,h2:e.target.value}))} style={{...inp,flex:1}}/>{!isEdit&&form.h1&&!form.h2&&<button onClick={()=>setForm(f=>({...f,h2:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"4px 8px",fontSize:9,background:"#dc2626",whiteSpace:"nowrap"}}>⏹ Fin</button>}</div></div>
         </div>
         {isEdit?<div style={{marginBottom:12}}><label style={lbl}>Technicien (verrouillé)</label><div style={{...inp,background:"#f4f3ef",fontWeight:700,color:CL.sb}}>{form.tech}</div></div>
         :isM?<div style={{marginBottom:12}}><label style={lbl}>Technicien *</label><select value={form.tech} onChange={e=>setForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">--</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>
@@ -866,6 +873,8 @@ export default function App(){
         <div style={{marginBottom:12}}><label style={lbl}>Problèmes</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{PROBS.map(p=><button key={p} onClick={()=>toggleArr("probs",p)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.probs.includes(p)?"#dc2626":CL.bd}`,background:form.probs.includes(p)?"#fef2f2":"#fff",color:form.probs.includes(p)?"#dc2626":CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.probs.includes(p)?"✓ ":""}{p}</button>)}</div></div>
         <div style={{marginBottom:12}}><label style={lbl}>État *</label><select value={form.etat} onChange={e=>setForm(f=>({...f,etat:e.target.value}))} style={inp}><option value="">--</option>{ETATS.map(e=><option key={e} value={e}>{e}</option>)}</select></div>
         <div><label style={lbl}>Clients rétablis</label><input type="number" min="0" value={form.nbCli} onChange={e=>setForm(f=>({...f,nbCli:parseInt(e.target.value)||0}))} style={{...inp,maxWidth:90}}/></div>
+        {isM&&<div style={{marginTop:12}}><label style={lbl}>🎫 Tickets Helpers</label><input value={form.tickets||""} onChange={e=>setForm(f=>({...f,tickets:e.target.value}))} placeholder="Réf. tickets (ex: TK-12345, TK-12346)" style={{...inp,fontSize:12}}/></div>}
+        {isT&&form.tickets&&<div style={{marginTop:12}}><label style={lbl}>🎫 Tickets Helpers</label><div style={{...inp,background:"#f4f3ef",fontWeight:600,color:CL.dk}}>{form.tickets}</div></div>}
       </div>
       <div style={crd}><h3 style={sT}>🔧 Technique</h3>
         <div style={{marginBottom:12}}><label style={lbl}>Observations *</label><textarea value={form.obs} onChange={e=>setForm(f=>({...f,obs:e.target.value}))} rows={3} style={{...inp,resize:"vertical"}}/></div>
@@ -880,7 +889,7 @@ export default function App(){
           ))}
           <button onClick={()=>setForm(f=>({...f,mesures:[...(f.mesures||[]),{coupleur:(f.mesures||[]).length+1,valeur:""}]}))} style={{...b2,padding:"5px 12px",fontSize:10,color:"#2563eb",borderColor:"#93c5fd",marginTop:4}}>+ Ajouter un coupleur</button>
         </div>
-        <div style={{marginBottom:12}}><label style={lbl}>Matériel</label><textarea value={form.materiel} onChange={e=>setForm(f=>({...f,materiel:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></div>
+        <div style={{marginBottom:12}}><label style={lbl}>Matériel *</label><textarea value={form.materiel} onChange={e=>setForm(f=>({...f,materiel:e.target.value}))} rows={2} placeholder="Matériel utilisé..." style={{...inp,resize:"vertical"}}/></div>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><input type="checkbox" checked={form.suivi} onChange={e=>setForm(f=>({...f,suivi:e.target.checked}))} style={{width:16,height:16,accentColor:CL.a}}/><label style={{fontFamily:F,fontSize:12,fontWeight:700}}>Suivi nécessaire</label></div>
         {form.suivi&&<textarea value={form.suiviTxt} onChange={e=>setForm(f=>({...f,suiviTxt:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/>}
       </div>
@@ -951,6 +960,7 @@ export default function App(){
       {nbCli>0&&<div style={{marginBottom:10}}><span style={lbl}>Clients: </span><B color="green">{nbCli}</B></div>}
       {(()=>{let mes=r.mesures;try{if(typeof mes==="string"&&mes.startsWith("["))mes=JSON.parse(mes);}catch{}if(Array.isArray(mes)&&mes.length>0)return<div style={{marginBottom:10}}><div style={lbl}>Mesures optiques</div><div style={{background:"#f1f5f9",borderRadius:6,overflow:"hidden"}}>{mes.map((m,i)=><div key={i} style={{display:"flex",padding:"5px 10px",borderBottom:i<mes.length-1?`1px solid ${CL.bd}`:"none",fontFamily:F,fontSize:11}}><span style={{fontWeight:700,minWidth:90,color:CL.dk}}>Coupleur {m.coupleur}</span><span style={{fontFamily:"monospace",color:"#1e40af",fontWeight:600}}>{m.valeur}</span></div>)}</div></div>;if(typeof mes==="string"&&mes.trim())return<div style={{marginBottom:10}}><div style={lbl}>Mesures</div><div style={{fontFamily:"monospace",fontSize:10,background:"#f1f5f9",padding:6,borderRadius:4,whiteSpace:"pre-wrap"}}>{mes}</div></div>;return null;})()}
       {r.materiel&&<div style={{marginBottom:10}}><div style={lbl}>Matériel</div><div style={{fontFamily:F,fontSize:11,whiteSpace:"pre-wrap"}}>{r.materiel}</div></div>}
+      {r.tickets&&<div style={{marginBottom:10}}><div style={lbl}>🎫 Tickets Helpers</div><div style={{fontFamily:"monospace",fontSize:11,background:"#eff6ff",padding:6,borderRadius:4,color:"#1e40af",fontWeight:600}}>{r.tickets}</div></div>}
       {(r.iw_results||r.iwResults||[]).length>0&&<div style={{marginBottom:12}}>
         <div style={{...lbl,marginBottom:6}}>📋 Checklist IW ({(r.iw_results||r.iwResults).filter(iw=>iw.status==="Fait").length}/{(r.iw_results||r.iwResults).length})</div>
         {(r.iw_results||r.iwResults).map(iw=>{
