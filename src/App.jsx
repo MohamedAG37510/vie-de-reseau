@@ -537,7 +537,8 @@ export default function App(){
     try{
     if(editingR){
       // Re-submitting after rejection or editing → reset to pending
-      const ok=await updateReport({...form,id:editingR.id});
+      const autoNbCliEdit=(form.iwResults||[]).filter(iw=>iw.etat_box==="OK").length;
+      const ok=await updateReport({...form,id:editingR.id,nbCli:autoNbCliEdit});
       if(!ok)return;
       setReps(prev=>prev.map(rep=>rep.id===editingR.id?{...rep,validation:"pending",rejection_msg:null}:rep));
       await supabase.from("reports").update({validation:"pending",rejection_msg:null}).eq("id",editingR.id);
@@ -555,7 +556,8 @@ export default function App(){
       }
       clearDraft();setEditingR(null);setPg("hist");
     }else{
-      const r={...form,id:Date.now(),created:new Date().toISOString()};
+      const autoNbCli=(form.iwResults||[]).filter(iw=>iw.etat_box==="OK").length;
+      const r={...form,id:Date.now(),created:new Date().toISOString(),nbCli:autoNbCli};
       const ok=await insertReport(r);
       if(!ok)return; // Don't mark PM if insert failed
       // Mark PM as pending validation
@@ -872,7 +874,7 @@ export default function App(){
         :<div style={{marginBottom:12}}><label style={lbl}>Type *</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=><button key={t} onClick={()=>toggleArr("types",t)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.types.includes(t)?CL.a:CL.bd}`,background:form.types.includes(t)?"#fef2f2":"#fff",color:form.types.includes(t)?CL.a:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.types.includes(t)?"✓ ":""}{t}</button>)}</div></div>}
         <div style={{marginBottom:12}}><label style={lbl}>Problèmes</label><div style={{display:"flex",flexWrap:"wrap",gap:4}}>{PROBS.map(p=><button key={p} onClick={()=>toggleArr("probs",p)} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${form.probs.includes(p)?"#dc2626":CL.bd}`,background:form.probs.includes(p)?"#fef2f2":"#fff",color:form.probs.includes(p)?"#dc2626":CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{form.probs.includes(p)?"✓ ":""}{p}</button>)}</div></div>
         <div style={{marginBottom:12}}><label style={lbl}>État *</label><select value={form.etat} onChange={e=>setForm(f=>({...f,etat:e.target.value}))} style={inp}><option value="">--</option>{ETATS.map(e=><option key={e} value={e}>{e}</option>)}</select></div>
-        <div><label style={lbl}>Clients rétablis</label><input type="number" min="0" value={form.nbCli} onChange={e=>setForm(f=>({...f,nbCli:parseInt(e.target.value)||0}))} style={{...inp,maxWidth:90}}/></div>
+        <div><label style={lbl}>Clients rétablis</label><div style={{...inp,background:"#f0fdf4",fontWeight:700,color:"#059669",maxWidth:90,textAlign:"center"}}>{(form.iwResults||[]).filter(iw=>iw.etat_box==="OK").length}</div><div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:2}}>Calculé automatiquement (IW avec Box OK)</div></div>
         {isM&&<div style={{marginTop:12}}><label style={lbl}>🎫 Tickets Helpers</label><input value={form.tickets||""} onChange={e=>setForm(f=>({...f,tickets:e.target.value}))} placeholder="Réf. tickets (ex: TK-12345, TK-12346)" style={{...inp,fontSize:12}}/></div>}
         {isT&&form.tickets&&<div style={{marginTop:12}}><label style={lbl}>🎫 Tickets Helpers</label><div style={{...inp,background:"#f4f3ef",fontWeight:600,color:CL.dk}}>{form.tickets}</div></div>}
       </div>
@@ -996,6 +998,20 @@ export default function App(){
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`listing_iw_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);
   };
 
+  const exportTickets=(crList)=>{
+    const rows=[["Code PM","Dept","Tech","Date","État","Clients rétablis","Tickets Helpers"]];
+    crList.forEach(r=>{
+      if(r.tickets){
+        rows.push([r.pmCode||r.pm_code||"",r.pmDept||r.pm_dept||"",r.tech||"",r.date||"",r.etat||"",r.nbCli||r.nb_cli||0,r.tickets||""]);
+      }
+    });
+    if(rows.length<=1){alert("Aucun ticket Helpers à exporter.");return;}
+    const csv=rows.map(r=>r.map(c=>`"${(c+"").replace(/"/g,'""')}"`).join(";")).join("\n");
+    const bom="\uFEFF";
+    const blob=new Blob([bom+csv],{type:"text/csv;charset=utf-8;"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`tickets_helpers_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);
+  };
+
   const Hist=()=>{
     const fl=myReps.filter(r=>{
       const s=histSearch.toLowerCase();
@@ -1017,7 +1033,8 @@ export default function App(){
         <div><label style={{...lbl,marginBottom:2}}>Du</label><input type="date" value={histDateFrom} onChange={e=>setHistDateFrom(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
         <div><label style={{...lbl,marginBottom:2}}>Au</label><input type="date" value={histDateTo} onChange={e=>setHistDateTo(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
         {(histDateFrom||histDateTo)&&<button onClick={()=>{setHistDateFrom("");setHistDateTo("");}} style={{...b2,padding:"6px 10px",fontSize:10}}>✕ Reset</button>}
-        {fl.length>0&&<button onClick={()=>exportIWListing(fl)} style={{...b1,padding:"6px 12px",fontSize:10,background:"#059669",marginLeft:"auto"}}>📥 Export listing IW</button>}
+        {fl.length>0&&<button onClick={()=>exportIWListing(fl)} style={{...b1,padding:"6px 12px",fontSize:10,background:"#059669",marginLeft:"auto"}}>📥 Export IW</button>}
+        {isM&&fl.length>0&&fl.some(r=>r.tickets)&&<button onClick={()=>exportTickets(fl)} style={{...b1,padding:"6px 12px",fontSize:10,background:"#1e40af"}}>🎫 Export Tickets</button>}
       </div>
       {fl.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
         <div style={{...crd,padding:8,marginBottom:0,borderLeft:"4px solid #2563eb",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>📝</span><div><div style={{fontSize:16,fontWeight:800,fontFamily:F}}>{fl.length}</div><div style={{fontSize:8,color:CL.sb,fontFamily:F,textTransform:"uppercase"}}>CR</div></div></div>
