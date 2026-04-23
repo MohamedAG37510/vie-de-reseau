@@ -185,7 +185,13 @@ export default function App(){
     if(photos.length>0){
       photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));
     }
-    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,tickets:r.tickets||"",iw_results:r.iwResults||[]};
+    // Compose materiel from structured fields
+    const matParts=[];
+    if(r.materiel_j>0)matParts.push(`Jarretière(s): ${r.materiel_j}`);
+    if(r.materiel_c>0)matParts.push(`Connecteur(s) méca.: ${r.materiel_c}`);
+    if(r.materiel_autre)matParts.push(r.materiel_autre);
+    const materielStr=matParts.join(" · ")||r.materiel||"";
+    const row={id:r.id,pm_code:r.pmCode,pm_adresse:r.pmAdresse,pm_dept:r.pmDept,date:r.date,h1:r.h1,h2:r.h2,tech:r.tech,types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:materielStr,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,tickets:r.tickets||"",iw_results:r.iwResults||[]};
     const{error}=await supabase.from("reports").insert(row);
     if(error){alert("❌ Erreur lors de l'enregistrement du CR : "+error.message);console.error("Insert report error:",error);return false;}
     setReps(prev=>[{...row,...r,pmCode:r.pmCode,pmAdresse:r.pmAdresse,pmDept:r.pmDept,nbCli:r.nbCli,suiviTxt:r.suiviTxt,validation:"pending",photos},...prev]);
@@ -198,7 +204,13 @@ export default function App(){
     if(photos.length>0){
       photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));
     }
-    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:r.materiel,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,tickets:r.tickets||"",iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
+    // Compose materiel from structured fields
+    const matParts2=[];
+    if(r.materiel_j>0)matParts2.push(`Jarretière(s): ${r.materiel_j}`);
+    if(r.materiel_c>0)matParts2.push(`Connecteur(s) méca.: ${r.materiel_c}`);
+    if(r.materiel_autre)matParts2.push(r.materiel_autre);
+    const materielStr2=matParts2.join(" · ")||r.materiel||"";
+    const updates={types:r.types,probs:r.probs,etat:r.etat,nb_cli:r.nbCli,mesures:JSON.stringify(r.mesures||[]),actions:r.actions,materiel:materielStr2,obs:r.obs,suivi:r.suivi,suivi_txt:r.suiviTxt,photos,tickets:r.tickets||"",iw_results:r.iwResults||[],h1:r.h1,h2:r.h2};
     const{error}=await supabase.from("reports").update(updates).eq("id",r.id);
     if(error){alert("❌ Erreur lors de la mise à jour du CR : "+error.message);return false;}
     setReps(prev=>prev.map(rep=>rep.id===r.id?{...rep,...updates,nbCli:r.nbCli,suiviTxt:r.suiviTxt,types:r.types,probs:r.probs,etat:r.etat,iwResults:r.iwResults}:rep));
@@ -518,7 +530,7 @@ export default function App(){
     const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""}));
     const assInfo=assigns[pm.code]||{};
     const assignedTypes=assInfo.types||[];
-    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:[],actions:"",materiel:"",obs:"",photos:[],suivi:false,suiviTxt:"",tickets:"",iwResults});setPg("form");
+    setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:[],actions:"",materiel:"",materiel_j:0,materiel_c:0,materiel_autre:"",obs:"",photos:[],suivi:false,suiviTxt:"",tickets:"",iwResults});setPg("form");
   };
   const startEditCR=(r)=>{
     const pmCode=r.pmCode||r.pm_code||"";const pmAdresse=r.pmAdresse||r.pm_adresse||"";const pmDept=r.pmDept||r.pm_dept||"";
@@ -528,7 +540,12 @@ export default function App(){
     setSelPM(fakePM);setEditingR(r);
     let parsedMesures=[];
     try{if(typeof r.mesures==="string"&&r.mesures.startsWith("["))parsedMesures=JSON.parse(r.mesures);else if(typeof r.mesures==="string"&&r.mesures.trim())parsedMesures=[{coupleur:1,valeur:r.mesures}];else if(Array.isArray(r.mesures))parsedMesures=r.mesures;}catch{parsedMesures=r.mesures?[{coupleur:1,valeur:r.mesures}]:[];}
-    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:parsedMesures,actions:r.actions||"",materiel:r.materiel||"",obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,tickets:r.tickets||"",iwResults:iwRes});
+    // Parse materiel back into structured fields
+    let mj=0,mc=0,ma="";const mat=r.materiel||"";
+    const jMatch=mat.match(/Jarretière\(s\):\s*(\d+)/i);if(jMatch)mj=parseInt(jMatch[1]);
+    const cMatch=mat.match(/Connecteur\(s\) méca\.?:\s*(\d+)/i);if(cMatch)mc=parseInt(cMatch[1]);
+    ma=mat.replace(/Jarretière\(s\):\s*\d+/i,"").replace(/Connecteur\(s\) méca\.?:\s*\d+/i,"").replace(/·/g,"").trim();
+    setForm({id:r.id,pmCode,pmAdresse,pmDept,date:r.date||"",h1:r.h1||"",h2:r.h2||"",tech:r.tech||"",types:r.types||[],probs:r.probs||[],etat:r.etat||"",nbCli,mesures:parsedMesures,actions:r.actions||"",materiel:r.materiel||"",materiel_j:mj,materiel_c:mc,materiel_autre:ma,obs:r.obs||"",photos:r.photos||[],suivi:!!r.suivi,suiviTxt,tickets:r.tickets||"",iwResults:iwRes});
     setViewR(null);setPg("form");
   };
   const submitCR=async()=>{
@@ -848,8 +865,9 @@ export default function App(){
   // ========== FORM ==========
   const FormCR=()=>{
     if(!form)return null;
+    const matOk=(form.materiel_j||0)>0||(form.materiel_c||0)>0||(form.materiel_autre||"").trim().length>0||(form.materiel||"").trim().length>0;
     const iwComplete=!form.iwResults||form.iwResults.length===0||form.iwResults.every(iw=>iw.status&&iw.etat_box);
-    const ok=form.tech&&form.types.length>0&&form.etat&&form.obs&&form.materiel&&form.h1&&form.h2&&iwComplete;
+    const ok=form.tech&&form.types.length>0&&form.etat&&form.obs&&matOk&&form.h1&&form.h2&&iwComplete;
     const isEdit=!!editingR;
     return(<div style={{padding:16,maxWidth:800,margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -891,7 +909,20 @@ export default function App(){
           ))}
           <button onClick={()=>setForm(f=>({...f,mesures:[...(f.mesures||[]),{coupleur:(f.mesures||[]).length+1,valeur:""}]}))} style={{...b2,padding:"5px 12px",fontSize:10,color:"#2563eb",borderColor:"#93c5fd",marginTop:4}}>+ Ajouter un coupleur</button>
         </div>
-        <div style={{marginBottom:12}}><label style={lbl}>Matériel *</label><textarea value={form.materiel} onChange={e=>setForm(f=>({...f,materiel:e.target.value}))} rows={2} placeholder="Matériel utilisé..." style={{...inp,resize:"vertical"}}/></div>
+        <div style={{marginBottom:12}}>
+          <label style={lbl}>Matériel *</label>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontFamily:F,fontSize:11,fontWeight:600,color:CL.dk,minWidth:140}}>Jarretière(s)</span>
+              <select value={(form.materiel_j||0)} onChange={e=>setForm(f=>({...f,materiel_j:parseInt(e.target.value)||0}))} style={{...inp,width:70,fontSize:12,padding:"4px 6px",textAlign:"center"}}>{[...Array(51)].map((_,i)=><option key={i} value={i}>{i}</option>)}</select>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontFamily:F,fontSize:11,fontWeight:600,color:CL.dk,minWidth:140}}>Connecteur(s) méca.</span>
+              <select value={(form.materiel_c||0)} onChange={e=>setForm(f=>({...f,materiel_c:parseInt(e.target.value)||0}))} style={{...inp,width:70,fontSize:12,padding:"4px 6px",textAlign:"center"}}>{[...Array(11)].map((_,i)=><option key={i} value={i}>{i}</option>)}</select>
+            </div>
+          </div>
+          <div style={{marginTop:8}}><input value={form.materiel_autre||""} onChange={e=>setForm(f=>({...f,materiel_autre:e.target.value}))} placeholder="Autre matériel (optionnel)" style={{...inp,fontSize:11}}/></div>
+        </div>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><input type="checkbox" checked={form.suivi} onChange={e=>setForm(f=>({...f,suivi:e.target.checked}))} style={{width:16,height:16,accentColor:CL.a}}/><label style={{fontFamily:F,fontSize:12,fontWeight:700}}>Suivi nécessaire</label></div>
         {form.suivi&&<textarea value={form.suiviTxt} onChange={e=>setForm(f=>({...f,suiviTxt:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/>}
       </div>
