@@ -66,6 +66,7 @@ export default function App(){
   const [messages,setMessages]=useState([]); // {message, count} or null
   const fileRef=useRef(null);
   const impRef=useRef(null);
+  const msaRef=useRef(null);
   const reportRef=useRef(null);
 
   // Persist session across page reloads
@@ -291,6 +292,41 @@ export default function App(){
 
   const startEditIW=(iw)=>{setIwEditId(iw.id);setIwForm({ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire:iw.commentaire||""});};
   const cancelEditIW=()=>{setIwEditId(null);setIwForm({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});};
+
+  // ========== MSA IMPORT ==========
+  const [msaMsg,setMsaMsg]=useState("");
+  const handleImportMSA=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const rd=new FileReader();rd.onload=async ev=>{
+      const txt=ev.target.result;
+      const lines=txt.split(/\r?\n/).filter(l=>l.trim());if(lines.length<2){setMsaMsg("❌ Fichier vide");return;}
+      const sep=lines[0].includes(";")?";":lines[0].includes("\t")?"\t":",";
+      const cols=lines[0].split(sep).map(c=>c.trim().toLowerCase().replace(/["\uFEFF]/g,""));
+      const iC=cols.findIndex(c=>c.includes("code")||c.includes("pm"));
+      const iR=cols.findIndex(c=>c.includes("ref")||c.includes("msa")||c.includes("jeton"));
+      const iCom=cols.findIndex(c=>c.includes("comment")||c.includes("obs")||c.includes("note"));
+      if(iC<0||iR<0){setMsaMsg("❌ Colonnes introuvables. Attendu : Code PM, Réf MSA, [Commentaire]");return;}
+      let count=0;const newItems=[];
+      for(let i=1;i<lines.length;i++){
+        const vals=lines[i].split(sep).map(v=>v.trim().replace(/^"|"$/g,""));
+        const pmCode=vals[iC]||"";const refMsa=vals[iR]||"";
+        if(!pmCode||!refMsa)continue;
+        // Check PM exists
+        if(!pms.some(p=>p.code===pmCode))continue;
+        const id=`msa_${Date.now()}_${i}_${Math.random().toString(36).slice(2,6)}`;
+        const row={id,pm_code:pmCode,ref_iw:refMsa,cote_oc:"",cote_oi:"",commentaire:iCom>=0?(vals[iCom]||""):"",type:"MSA"};
+        newItems.push(row);count++;
+      }
+      if(newItems.length>0){
+        // Insert in batches of 50
+        for(let i=0;i<newItems.length;i+=50){
+          await supabase.from("iw_items").insert(newItems.slice(i,i+50));
+        }
+        setIwItems(prev=>[...prev,...newItems.map(r=>({...r,created_at:new Date().toISOString()}))]);
+      }
+      setMsaMsg(`✅ ${count} MSA importées`);
+    };rd.readAsText(file);e.target.value="";
+  };
 
   // ========== REACTIVATE PM ==========
   const reactivatePM=async(code)=>{
@@ -528,7 +564,7 @@ export default function App(){
     }catch{}
     // No draft — start fresh
     const pmIws=iwForPM(pm.code);
-    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:""}));
+    const iwResults=pmIws.map(iw=>({id:iw.id,ref_iw:iw.ref_iw,cote_oc:iw.cote_oc||"",cote_oi:iw.cote_oi||"",commentaire_mgr:iw.commentaire||"",status:"",commentaire_tech:"",etat_box:"",type:iw.type||"IW"}));
     const assInfo=assigns[pm.code]||{};
     const assignedTypes=assInfo.types||[];
     setSelPM(pm);setForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,date:new Date().toISOString().slice(0,10),h1:"",h2:"",tech:isT?tName:(assInfo.tech||""),types:assignedTypes,probs:[],etat:"",nbCli:0,mesures:[],actions:"",materiel:"",materiel_j:0,materiel_c:0,materiel_autre:"",obs:"",photos:[],suivi:false,suiviTxt:"",tickets:"",iwResults});setPg("form");
@@ -762,6 +798,14 @@ export default function App(){
       <div style={{fontFamily:F,fontSize:13,color:CL.dk}}><strong>{activePms.length}</strong> PM actifs · <strong>{resolvedPms.length}</strong> résolus · <strong>{depts.length}</strong> depts</div>
       {pms.length>0&&<button onClick={()=>{if(window.confirm("Supprimer TOUS les PM et affectations ? Les CR sont conservés."))resetPms();}} style={{...b2,marginTop:10,fontSize:11,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Réinitialiser</button>}
     </div>
+    <h2 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginTop:20,marginBottom:10}}>📋 Import MSA</h2>
+    <div style={crd}>
+      <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Format CSV : Code PM ; Réf MSA ; Commentaire (optionnel)</div>
+      <input ref={msaRef} type="file" accept=".csv,.tsv,.txt" onChange={handleImportMSA} style={{display:"none"}}/>
+      <button onClick={()=>msaRef.current?.click()} style={{...b1,background:"#fff",color:"#7c3aed",border:"2px dashed #7c3aed",width:"100%",padding:14,fontSize:13,marginBottom:8}}>📂 Importer fichier MSA</button>
+      {msaMsg&&<div style={{padding:8,borderRadius:6,background:msaMsg.includes("✅")?"#dcfce7":"#fee2e2",fontFamily:F,fontSize:12,fontWeight:600,color:msaMsg.includes("✅")?"#166534":"#b91c1c"}}>{msaMsg}</div>}
+      <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginTop:6}}>{iwItems.filter(i=>i.type==="MSA").length} MSA en base · {iwItems.filter(i=>!i.type||i.type!=="MSA").length} IW</div>
+    </div>
   </div>);
 
   // ========== DASHBOARD ==========
@@ -934,13 +978,17 @@ export default function App(){
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><input type="checkbox" checked={form.suivi} onChange={e=>setForm(f=>({...f,suivi:e.target.checked}))} style={{width:16,height:16,accentColor:CL.a}}/><label style={{fontFamily:F,fontSize:12,fontWeight:700}}>Suivi nécessaire</label></div>
         {form.suivi&&<textarea value={form.suiviTxt} onChange={e=>setForm(f=>({...f,suiviTxt:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/>}
       </div>
-      {form.iwResults?.length>0&&<div style={crd}><h3 style={sT}>📋 Checklist IW ({form.iwResults.filter(iw=>iw.status).length}/{form.iwResults.length})</h3>
+      {form.iwResults?.length>0&&<div style={crd}><h3 style={sT}>📋 Checklist IW/MSA ({form.iwResults.filter(iw=>iw.status).length}/{form.iwResults.length})</h3>
         {form.iwResults.map((iw,i)=>{
           const stColors={Fait:"#059669","Pas fait":"#dc2626",Impossible:"#7c3aed"};
-          return(<div key={iw.id} style={{padding:12,marginBottom:8,borderRadius:8,border:`1.5px solid ${iw.status?stColors[iw.status]||CL.bd:CL.bd}`,background:iw.status?(iw.status==="Fait"?"#f0fdf4":iw.status==="Impossible"?"#faf5ff":"#fef2f2"):"#fff"}}>
+          const isMSA=iw.type==="MSA";
+          return(<div key={iw.id} style={{padding:12,marginBottom:8,borderRadius:8,border:`1.5px solid ${isMSA?"#7c3aed":iw.status?stColors[iw.status]||CL.bd:CL.bd}`,background:iw.status?(iw.status==="Fait"?"#f0fdf4":iw.status==="Impossible"?"#faf5ff":"#fef2f2"):"#fff"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
               <div>
-                <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{iw.ref_iw}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{iw.ref_iw}</span>
+                  {isMSA&&<span style={{padding:"1px 6px",borderRadius:10,background:"#7c3aed",color:"#fff",fontFamily:F,fontSize:8,fontWeight:800}}>MSA</span>}
+                </div>
                 {(iw.cote_oc||iw.cote_oi)&&<div style={{fontFamily:F,fontSize:10,color:CL.sb}}>{iw.cote_oc&&`OC: ${iw.cote_oc}`}{iw.cote_oc&&iw.cote_oi&&" · "}{iw.cote_oi&&`OI: ${iw.cote_oi}`}</div>}
               </div>
               <B color={iw.status==="Fait"?"green":iw.status==="Impossible"?"purple":iw.status==="Pas fait"?"red":"gray"}>{iw.status||"À traiter"}</B>
