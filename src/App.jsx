@@ -59,6 +59,7 @@ export default function App(){
   const [toast,setToast]=useState(null);
   const [fTech,setFTech]=useState("all"); // tech filter on dashboard
   const [fVille,setFVille]=useState("all"); // city filter on dashboard
+  const [showVilleStats,setShowVilleStats]=useState(false); // ville ranking modal
   const [showReject,setShowReject]=useState(null); // report to reject
   const [rejectPresets,setRejectPresets]=useState([]);
   const [rejectCustom,setRejectCustom]=useState("");
@@ -782,6 +783,7 @@ export default function App(){
         {isM&&<select value={fTech} onChange={e=>setFTech(e.target.value)} style={{...inp,maxWidth:140,fontSize:13}}><option value="all">Tous techs</option><option value="unassigned">Non affectés</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select>}
         {isM&&villes.length>0&&<select value={fVille} onChange={e=>setFVille(e.target.value)} style={{...inp,maxWidth:160,fontSize:13}}><option value="all">Toutes villes</option>{villes.map(v=><option key={v} value={v}>{v}</option>)}</select>}
         {isM&&Object.keys(assigns).length>0&&<button onClick={()=>{if(window.confirm("Supprimer toutes les affectations (techs + types) ?\nLes PM et CR sont conservés."))resetAssignments();}} style={{...b2,padding:"6px 12px",fontSize:10,color:"#c2410c",borderColor:"#fed7aa",marginLeft:"auto"}}>🔄 Réinitialiser les affectations</button>}
+        {isM&&<button onClick={()=>setShowVilleStats(true)} style={{...b2,padding:"6px 12px",fontSize:10,color:"#1e40af",borderColor:"#93c5fd"}}>📊 Stats villes</button>}
       </div>
       <div style={{...crd,padding:0,overflow:"hidden"}}>
         <div style={{display:"grid",gridTemplateColumns:isM?"2fr .5fr 2.5fr .6fr .7fr 1.4fr 1fr":"2.2fr .5fr 3fr .7fr .8fr 1fr",background:CL.dk,color:"#fff",fontFamily:F,fontSize:9,fontWeight:700,padding:"7px 10px",textTransform:"uppercase"}}>
@@ -1376,6 +1378,28 @@ export default function App(){
       <div style={{marginBottom:12}}><label style={lbl}>Message personnalisé</label><textarea value={rejectCustom} onChange={e=>setRejectCustom(e.target.value)} rows={3} placeholder="Détails supplémentaires..." style={{...inp,resize:"vertical",fontSize:12}}/></div>
       <div style={{display:"flex",gap:8}}><button onClick={()=>rejectCR(showReject)} style={{...b1,background:"#dc2626",flex:1}}>🔄 Envoyer le renvoi</button><button onClick={()=>setShowReject(null)} style={{...b2,flex:1}}>Annuler</button></div>
     </div></div>)}
+    {showVilleStats&&isM&&(()=>{
+      const villeData={};
+      activePms.forEach(pm=>{const v=getVille(pm.adresse);if(!v)return;if(!villeData[v])villeData[v]={pm:0,iw:0};villeData[v].pm++;villeData[v].iw+=pm.nbIW;});
+      const sorted=Object.entries(villeData).sort((a,b)=>b[1].pm-a[1].pm);
+      return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowVilleStats(false)}>
+        <div style={{background:"#fff",borderRadius:12,padding:20,width:500,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+          <h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginBottom:12}}>📊 Classement des villes</h3>
+          <div style={{display:"grid",gridTemplateColumns:"2fr .8fr .8fr",gap:0,fontFamily:F,fontSize:11}}>
+            <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>VILLE</div>
+            <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>PM</div>
+            <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>IW</div>
+            {sorted.map(([ville,d],i)=><React.Fragment key={ville}>
+              <div style={{padding:"5px 8px",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:i<3?700:400,color:i<3?CL.dk:CL.sb,cursor:"pointer"}} onClick={()=>{setFVille(ville);setShowVilleStats(false);}}>{i<3?["🥇","🥈","🥉"][i]+" ":""}{ville}</div>
+              <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:700,color:"#2563eb"}}>{d.pm}</div>
+              <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:700,color:CL.a}}>{d.iw}</div>
+            </React.Fragment>)}
+          </div>
+          <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:10}}>Cliquer sur une ville pour filtrer le dashboard</div>
+          <button onClick={()=>setShowVilleStats(false)} style={{...b2,width:"100%",marginTop:12}}>Fermer</button>
+        </div>
+      </div>);
+    })()}
     {Lightbox()}
     {toast&&<div onClick={()=>setToast(null)} style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:"#1e40af",color:"#fff",fontFamily:F,fontSize:13,fontWeight:700,padding:"14px 24px",borderRadius:12,boxShadow:"0 8px 32px rgba(0,0,0,.25)",zIndex:9998,cursor:"pointer",maxWidth:"90vw",textAlign:"center",animation:"slideDown .4s ease"}}><style>{`@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-20px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}`}</style>🔔 {toast.message}</div>}
   </div>);
