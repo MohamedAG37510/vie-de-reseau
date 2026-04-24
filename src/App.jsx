@@ -1389,11 +1389,11 @@ export default function App(){
             <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>VILLE</div>
             <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>PM</div>
             <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>IW</div>
-            {sorted.map(([ville,d],i)=><React.Fragment key={ville}>
+            {sorted.map(([ville,d],i)=><div key={ville} style={{display:"contents"}}>
               <div style={{padding:"5px 8px",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:i<3?700:400,color:i<3?CL.dk:CL.sb,cursor:"pointer"}} onClick={()=>{setFVille(ville);setShowVilleStats(false);}}>{i<3?["🥇","🥈","🥉"][i]+" ":""}{ville}</div>
               <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:700,color:"#2563eb"}}>{d.pm}</div>
               <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:700,color:CL.a}}>{d.iw}</div>
-            </React.Fragment>)}
+            </div>)}
           </div>
           <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:10}}>Cliquer sur une ville pour filtrer le dashboard</div>
           <button onClick={()=>setShowVilleStats(false)} style={{...b2,width:"100%",marginTop:12}}>Fermer</button>
