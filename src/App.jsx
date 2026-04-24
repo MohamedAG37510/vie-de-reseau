@@ -226,13 +226,14 @@ export default function App(){
   };
 
   const addTech=async(name)=>{
-    supabase.from("techs").insert({name,code:""});
+    const{error}=await supabase.from("techs").insert({name,code:""});
+    if(error){alert("❌ Erreur ajout technicien : "+error.message);return;}
     setTechs(prev=>[...prev,{name,code:""}].sort((a,b)=>a.name.localeCompare(b.name)));
   };
 
   const removeTech=async(name)=>{
-    supabase.from("techs").delete().eq("name",name);
-    supabase.from("assignments").delete().eq("tech_name",name);
+    await supabase.from("techs").delete().eq("name",name);
+    await supabase.from("assignments").delete().eq("tech_name",name);
     setTechs(prev=>prev.filter(t=>t.name!==name));
     setAssigns(prev=>{const na={...prev};Object.keys(na).forEach(k=>{if(na[k]?.tech===name)delete na[k];});return na;});
   };
@@ -331,7 +332,7 @@ export default function App(){
   // ========== REACTIVATE PM ==========
   const reactivatePM=async(code)=>{
     setPms(prev=>prev.map(p=>p.code===code?{...p,resolved:false,resolved_at:null,resolved_reason:null}:p));
-    supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",code);
+    await supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",code);
   };
 
   // ========== DELETE PMS ==========
