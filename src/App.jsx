@@ -158,7 +158,7 @@ export default function App(){
     return()=>{cancelled=true;};
   },[loadAll]);
 
-  // Realtime subscriptions - only start AFTER initial load is complete
+  // Realtime subscriptions - only on tables that need it, with long debounce
   const typingRef=useRef(false);
   const pgRef=useRef(pg);
   useEffect(()=>{pgRef.current=pg;},[pg]);
@@ -171,8 +171,6 @@ export default function App(){
     return ()=>{document.removeEventListener('focusin',onFocusIn);document.removeEventListener('focusout',onFocusOut);};
   },[]);
   useEffect(()=>{
-    // Don't start realtime until loading is done
-    if(loading)return;
     let timer=null;
     const debouncedLoad=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!typingRef.current&&pgRef.current!=="form")loadAll();},3000);};
     const ch = supabase.channel("all-changes")
@@ -182,7 +180,7 @@ export default function App(){
       .on("postgres_changes",{event:"*",schema:"public",table:"iw_items"},debouncedLoad)
       .subscribe();
     return ()=>{clearTimeout(timer);supabase.removeChannel(ch);};
-  },[loadAll,loading]);
+  },[loadAll]);
 
   // ========== SUPABASE MUTATIONS ==========
   const savePms=async(newPms)=>{
