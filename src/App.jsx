@@ -119,25 +119,37 @@ export default function App(){
   const [loadError,setLoadError]=useState(false);
   const loadAll = useCallback(async()=>{
     try{
-      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
-        supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
+      // Phase 1: Critical data (small tables first)
+      const [{data:techData},{data:cfgData},{data:assData}] = await Promise.all([
         supabase.from("techs").select("*").order("name"),
-        supabase.from("reports").select("*").order("created_at",{ascending:false}),
-        supabase.from("assignments").select("*"),
         supabase.from("config").select("*"),
+        supabase.from("assignments").select("*"),
+      ]);
+      if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
+      if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
+      if(assData){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
+      // Allow login as soon as we have techs+config
+      if(techData&&cfgData)setLoading(false);
+
+      // Phase 2: Heavy data (can take longer)
+      const [{data:pmData},{data:repData},{data:iwData}] = await Promise.all([
+        supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
+        supabase.from("reports").select("*").order("created_at",{ascending:false}),
         supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
+      ]);
+      if(pmData&&pmData.length>=0) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
+      if(repData&&repData.length>=0) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
+      if(iwData&&iwData.length>=0) setIwItems(iwData);
+
+      // Phase 3: Non-critical (notifications, messages)
+      const [{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
         supabase.from("messages").select("*").order("created_at",{ascending:false}),
       ]);
-      if(pmData&&pmData.length>=0) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
-      if(techData&&techData.length>=0){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
-      if(repData&&repData.length>=0) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
-      if(assData&&assData.length>=0){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
-      if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
-      if(iwData&&iwData.length>=0) setIwItems(iwData);
       if(notifData) setNotifications(notifData);
       if(msgData) setMessages(msgData);
-      setLoading(false);setLoadError(false);
+
+      setLoadError(false);
       return true;
     }catch(e){
       console.error("Load error:",e);
