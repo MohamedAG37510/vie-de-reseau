@@ -341,7 +341,7 @@ export default function App(){
         // Check PM exists
         if(!pms.some(p=>p.code===pmCode))continue;
         const id=`msa_${Date.now()}_${i}_${Math.random().toString(36).slice(2,6)}`;
-        const row={id,pm_code:pmCode,ref_iw:refMsa,cote_oc:"",cote_oi:"",commentaire:iCom>=0?(vals[iCom]||""):"",type:"MSA"};
+        const row={id,pm_code:pmCode,ref_iw:refMsa,cote_oc:"",cote_oi:"",commentaire:(iCom>=0&&vals[iCom])?vals[iCom]:"MSA à clôturer sur Aboracco",type:"MSA"};
         newItems.push(row);count++;
       }
       if(newItems.length>0){
@@ -865,7 +865,7 @@ export default function App(){
         </div>
         <div style={{maxHeight:400,overflowY:"auto"}}>
           {filtered.map((pm,i)=>(<div key={pm.code} style={{display:"grid",gridTemplateColumns:isM?"2fr .5fr 2.5fr .6fr .7fr 1.4fr 1fr":"2.2fr .5fr 3fr .7fr .8fr 1fr",padding:"6px 10px",fontFamily:F,fontSize:11,background:i%2===0?"#fff":"#fafaf6",borderBottom:`1px solid ${CL.bd}`,alignItems:"center"}}>
-            <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}</div>
+            <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}{iwItems.some(iw=>iw.pm_code===pm.code&&iw.type==="MSA")&&<span style={{marginLeft:4,padding:"1px 5px",borderRadius:8,background:"#7c3aed",color:"#fff",fontFamily:F,fontSize:7,fontWeight:800,verticalAlign:"middle"}}>MSA</span>}</div>
             <div style={{color:CL.sb,fontSize:10}}>{pm.dept}</div>
             <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
             <div style={{textAlign:"center",fontWeight:800,color:pm.nbIW>=10?"#dc2626":CL.dk,fontSize:12}}>{pm.nbIW}</div>
