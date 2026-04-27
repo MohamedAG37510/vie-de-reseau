@@ -115,6 +115,20 @@ export default function App(){
   const clearDraft=()=>{try{sessionStorage.removeItem("vdr_draft");sessionStorage.removeItem("vdr_draft_pm");}catch{}};
   const hasDraft=(pmCode)=>{try{const d=sessionStorage.getItem("vdr_draft");if(!d)return false;const p=JSON.parse(d);return p.pmCode===pmCode;}catch{return false;}};
 
+  // Lazy-load photos when viewing a specific CR
+  const loadPhotos=async(reportId)=>{
+    const{data}=await supabase.from("reports").select("photos").eq("id",reportId).single();
+    if(data?.photos){
+      setReps(prev=>prev.map(r=>r.id===reportId?{...r,photos:data.photos}:r));
+      // Also update viewR if it's the current one
+      setViewR(prev=>prev&&prev.id===reportId?{...prev,photos:data.photos}:prev);
+    }
+  };
+  const viewReport=(r)=>{
+    setViewR(r);
+    if(r&&!r.photos)loadPhotos(r.id);
+  };
+
   // ========== SUPABASE DATA LOADING ==========
   const [loadError,setLoadError]=useState(false);
   const loadAll = useCallback(async()=>{
@@ -122,7 +136,7 @@ export default function App(){
       const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
         supabase.from("techs").select("*").order("name"),
-        supabase.from("reports").select("*").order("created_at",{ascending:false}),
+        supabase.from("reports").select("id,pm_code,pm_adresse,pm_dept,date,h1,h2,tech,types,probs,etat,nb_cli,mesures,actions,materiel,obs,suivi,suivi_txt,iw_results,validation,rejection_msg,tickets,created_at").order("created_at",{ascending:false}),
         supabase.from("assignments").select("*"),
         supabase.from("config").select("*"),
         supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
@@ -1157,7 +1171,7 @@ export default function App(){
           const nbCli=r.nbCli||r.nb_cli||0;
           const iwRes=r.iw_results||r.iwResults||[];
           const iwDone=iwRes.filter(i=>i.status==="Fait").length;
-          return(<div key={r.id} style={{...crd,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setViewR(r)}>
+          return(<div key={r.id} style={{...crd,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>viewReport(r)}>
           <div style={{flex:1}}>
             <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2,flexWrap:"wrap"}}>
               <span style={{fontFamily:F,fontWeight:800,fontSize:12}}>{r.pmCode||r.pm_code}</span>
@@ -1285,7 +1299,7 @@ export default function App(){
         :myMsgs.map(m=>{
           const dateStr=m.created_at?new Date(m.created_at).toLocaleDateString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
           const relatedCR=reps.find(r=>r.id==m.report_id);
-          return(<div key={m.id} style={{...crd,borderLeft:`4px solid ${m.read?"#d1d5db":"#dc2626"}`,background:m.read?"#fff":"#fef2f2",cursor:"pointer"}} onClick={()=>{if(!m.read)markRead(m.id);if(relatedCR){setViewR(relatedCR);setPg("hist");}}}>
+          return(<div key={m.id} style={{...crd,borderLeft:`4px solid ${m.read?"#d1d5db":"#dc2626"}`,background:m.read?"#fff":"#fef2f2",cursor:"pointer"}} onClick={()=>{if(!m.read)markRead(m.id);if(relatedCR){viewReport(relatedCR);setPg("hist");}}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
               <div style={{display:"flex",gap:5,alignItems:"center"}}>
                 {!m.read&&<span style={{width:8,height:8,borderRadius:"50%",background:"#dc2626",flexShrink:0}}/>}
@@ -1322,7 +1336,7 @@ export default function App(){
         <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#92400e",marginBottom:8}}>🟡 CR en attente de validation ({pendingCRs.length})</h3>
         {pendingCRs.map(r=>{
           const pmCode=r.pmCode||r.pm_code||"";const dateStr=r.date?new Date(r.date).toLocaleDateString("fr-FR"):"";
-          return(<div key={r.id} style={{...crd,borderLeft:"4px solid #f59e0b",cursor:"pointer"}} onClick={()=>{setViewR(r);setPg("hist");}}>
+          return(<div key={r.id} style={{...crd,borderLeft:"4px solid #f59e0b",cursor:"pointer"}} onClick={()=>{viewReport(r);setPg("hist");}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{pmCode}</span><B color="orange">🟡 En attente</B></div>
               <span style={{fontFamily:F,fontSize:9,color:CL.sb}}>{dateStr}</span>
@@ -1337,7 +1351,7 @@ export default function App(){
         {resubMsgs.map(m=>{
           const dateStr=m.created_at?new Date(m.created_at).toLocaleDateString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"";
           const relatedCR=reps.find(r=>r.id==m.report_id);
-          return(<div key={m.id} style={{...crd,borderLeft:`4px solid ${m.read?"#93c5fd":"#1e40af"}`,background:m.read?"#fff":"#eff6ff",cursor:"pointer"}} onClick={()=>{if(!m.read)markRead(m.id);if(relatedCR){setViewR(relatedCR);setPg("hist");}}}>
+          return(<div key={m.id} style={{...crd,borderLeft:`4px solid ${m.read?"#93c5fd":"#1e40af"}`,background:m.read?"#fff":"#eff6ff",cursor:"pointer"}} onClick={()=>{if(!m.read)markRead(m.id);if(relatedCR){viewReport(relatedCR);setPg("hist");}}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
               <div style={{display:"flex",gap:5,alignItems:"center"}}>
                 {!m.read&&<span style={{width:8,height:8,borderRadius:"50%",background:"#1e40af",flexShrink:0}}/>}
