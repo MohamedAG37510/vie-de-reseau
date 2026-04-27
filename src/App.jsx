@@ -119,37 +119,25 @@ export default function App(){
   const [loadError,setLoadError]=useState(false);
   const loadAll = useCallback(async()=>{
     try{
-      // Phase 1: Critical data (small tables first)
-      const [{data:techData},{data:cfgData},{data:assData}] = await Promise.all([
-        supabase.from("techs").select("*").order("name"),
-        supabase.from("config").select("*"),
-        supabase.from("assignments").select("*"),
-      ]);
-      if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
-      if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
-      if(assData){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
-      // Allow login as soon as we have techs+config
-      if(techData&&cfgData)setLoading(false);
-
-      // Phase 2: Heavy data (can take longer)
-      const [{data:pmData},{data:repData},{data:iwData}] = await Promise.all([
+      const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
+        supabase.from("techs").select("*").order("name"),
         supabase.from("reports").select("*").order("created_at",{ascending:false}),
+        supabase.from("assignments").select("*"),
+        supabase.from("config").select("*"),
         supabase.from("iw_items").select("*").order("created_at",{ascending:true}),
-      ]);
-      if(pmData&&pmData.length>=0) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
-      if(repData&&repData.length>=0) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
-      if(iwData&&iwData.length>=0) setIwItems(iwData);
-
-      // Phase 3: Non-critical (notifications, messages)
-      const [{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
         supabase.from("messages").select("*").order("created_at",{ascending:false}),
       ]);
+      if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
+      if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
+      if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
+      if(assData){const a={};assData.forEach(x=>a[x.pm_code]={tech:x.tech_name,types:x.types||[]});setAssigns(a);}
+      if(cfgData){const mc=cfgData.find(c=>c.key==="mgr_code");if(mc)setMgrCode(mc.value);}
+      if(iwData) setIwItems(iwData);
       if(notifData) setNotifications(notifData);
       if(msgData) setMessages(msgData);
-
-      setLoadError(false);
+      setLoading(false);setLoadError(false);
       return true;
     }catch(e){
       console.error("Load error:",e);
@@ -157,17 +145,14 @@ export default function App(){
     }
   },[]);
 
-  // Initial load with 3 retries
+  // Initial load — retry up to 3 times with 3s delay
   useEffect(()=>{
     let cancelled=false;
-    const tryLoad=async(attempt)=>{
+    const tryLoad=async(n)=>{
       if(cancelled)return;
       const ok=await loadAll();
-      if(!ok&&attempt<3&&!cancelled){
-        setTimeout(()=>tryLoad(attempt+1),2000*(attempt+1));
-      }else if(!ok){
-        setLoading(false);setLoadError(true);
-      }
+      if(!ok&&n<3&&!cancelled) setTimeout(()=>tryLoad(n+1),3000);
+      else if(!ok){setLoading(false);setLoadError(true);}
     };
     tryLoad(0);
     return()=>{cancelled=true;};
@@ -761,15 +746,14 @@ export default function App(){
       <div style={{textAlign:"center"}}>
         <div style={{width:64,height:64,borderRadius:"50%",background:CL.dk,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><Logo/></div>
         <h1 style={{fontFamily:F,fontSize:20,fontWeight:800,color:CL.dk,marginBottom:8}}>VIE DE RÉSEAU</h1>
-        <div style={{fontFamily:F,fontSize:12,color:CL.sb}}>Connexion à la base de données...</div>
+        <div style={{fontFamily:F,fontSize:12,color:CL.sb}}>Chargement des données...</div>
         <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
         <div style={{marginTop:16,width:40,height:4,borderRadius:2,background:CL.a,margin:"16px auto 0",animation:"pulse 1.5s ease infinite"}}/>
-        <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:12}}>Tentative de connexion en cours...</div>
       </div>
     </div>
   );
 
-  // Show error banner if load failed
+  // Retry button
   const retryLoad=()=>{setLoading(true);setLoadError(false);loadAll().then(ok=>{if(!ok){setLoading(false);setLoadError(true);}});};
 
   // ========== LOGIN ==========
