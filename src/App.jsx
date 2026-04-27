@@ -116,8 +116,10 @@ export default function App(){
   const hasDraft=(pmCode)=>{try{const d=sessionStorage.getItem("vdr_draft");if(!d)return false;const p=JSON.parse(d);return p.pmCode===pmCode;}catch{return false;}};
 
   // ========== SUPABASE DATA LOADING ==========
-  const loadAll = useCallback(async()=>{
+  const [loadError,setLoadError]=useState(false);
+  const loadAll = useCallback(async(retry=0)=>{
     try{
+      setLoadError(false);
       const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
         supabase.from("techs").select("*").order("name"),
@@ -138,11 +140,19 @@ export default function App(){
       if(notifData) setNotifications(notifData);
       if(msgData) setMessages(msgData);
       // Only stop loading when we have valid data
-      if(techData&&cfgData) setLoading(false);
+      if(techData&&cfgData){setLoading(false);setLoadError(false);}
+      else if(retry<3){
+        // Data incomplete — retry after delay
+        setTimeout(()=>loadAll(retry+1),2000*(retry+1));
+      }else{setLoading(false);setLoadError(true);}
     }catch(e){
-      console.error("Load error:",e);
-      // Even on error, stop loading after 10s to avoid infinite spinner
-      setTimeout(()=>setLoading(false),2000);
+      console.error("Load error (attempt "+(retry+1)+"):",e);
+      if(retry<3){
+        // Auto-retry with increasing delay
+        setTimeout(()=>loadAll(retry+1),2000*(retry+1));
+      }else{
+        setLoading(false);setLoadError(true);
+      }
     }
   },[]);
 
@@ -739,9 +749,13 @@ export default function App(){
         <div style={{fontFamily:F,fontSize:12,color:CL.sb}}>Connexion à la base de données...</div>
         <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
         <div style={{marginTop:16,width:40,height:4,borderRadius:2,background:CL.a,margin:"16px auto 0",animation:"pulse 1.5s ease infinite"}}/>
+        <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:12}}>Tentative de connexion en cours...</div>
       </div>
     </div>
   );
+
+  // Show error banner if load failed but we're past loading
+  const ConnectionBanner=()=>loadError?<div onClick={()=>{setLoading(true);setLoadError(false);loadAll(0);}} style={{background:"#fee2e2",borderBottom:"2px solid #dc2626",padding:"8px 16px",fontFamily:F,fontSize:11,color:"#b91c1c",textAlign:"center",cursor:"pointer",fontWeight:600}}>⚠️ Connexion instable — Cliquer ici pour réessayer</div>:null;
 
   // ========== LOGIN ==========
   if(!user) return (
@@ -1419,6 +1433,7 @@ export default function App(){
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+    {ConnectionBanner()}
     {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="messages"&&MessagesPg()}{pg==="route"&&RoutePg()}
     {showReject&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowReject(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:440,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
       <h3 style={{fontFamily:F,color:"#dc2626",fontSize:14,fontWeight:800,marginBottom:12}}>🔄 Renvoyer le CR — {showReject.pmCode||showReject.pm_code}</h3>
