@@ -117,9 +117,8 @@ export default function App(){
 
   // ========== SUPABASE DATA LOADING ==========
   const [loadError,setLoadError]=useState(false);
-  const loadAll = useCallback(async(retry=0)=>{
+  const loadAll = useCallback(async()=>{
     try{
-      setLoadError(false);
       const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
         supabase.from("pms").select("*").order("nb_iw",{ascending:false}),
         supabase.from("techs").select("*").order("name"),
@@ -130,7 +129,6 @@ export default function App(){
         supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
         supabase.from("messages").select("*").order("created_at",{ascending:false}),
       ]);
-      // Only update state if data is valid (not null/undefined) — prevents flash
       if(pmData&&pmData.length>=0) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
       if(techData&&techData.length>=0){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData&&repData.length>=0) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
@@ -139,24 +137,29 @@ export default function App(){
       if(iwData&&iwData.length>=0) setIwItems(iwData);
       if(notifData) setNotifications(notifData);
       if(msgData) setMessages(msgData);
-      // Only stop loading when we have valid data
-      if(techData&&cfgData){setLoading(false);setLoadError(false);}
-      else if(retry<3){
-        // Data incomplete — retry after delay
-        setTimeout(()=>loadAll(retry+1),2000*(retry+1));
-      }else{setLoading(false);setLoadError(true);}
+      setLoading(false);setLoadError(false);
+      return true;
     }catch(e){
-      console.error("Load error (attempt "+(retry+1)+"):",e);
-      if(retry<3){
-        // Auto-retry with increasing delay
-        setTimeout(()=>loadAll(retry+1),2000*(retry+1));
-      }else{
-        setLoading(false);setLoadError(true);
-      }
+      console.error("Load error:",e);
+      return false;
     }
   },[]);
 
-  useEffect(()=>{loadAll();},[loadAll]);
+  // Initial load with 3 retries
+  useEffect(()=>{
+    let cancelled=false;
+    const tryLoad=async(attempt)=>{
+      if(cancelled)return;
+      const ok=await loadAll();
+      if(!ok&&attempt<3&&!cancelled){
+        setTimeout(()=>tryLoad(attempt+1),2000*(attempt+1));
+      }else if(!ok){
+        setLoading(false);setLoadError(true);
+      }
+    };
+    tryLoad(0);
+    return()=>{cancelled=true;};
+  },[loadAll]);
 
   // Realtime subscriptions - only on tables that need it, with long debounce
   const typingRef=useRef(false);
@@ -754,8 +757,8 @@ export default function App(){
     </div>
   );
 
-  // Show error banner if load failed but we're past loading
-  const ConnectionBanner=()=>loadError?<div onClick={()=>{setLoading(true);setLoadError(false);loadAll(0);}} style={{background:"#fee2e2",borderBottom:"2px solid #dc2626",padding:"8px 16px",fontFamily:F,fontSize:11,color:"#b91c1c",textAlign:"center",cursor:"pointer",fontWeight:600}}>⚠️ Connexion instable — Cliquer ici pour réessayer</div>:null;
+  // Show error banner if load failed
+  const retryLoad=()=>{setLoading(true);setLoadError(false);loadAll().then(ok=>{if(!ok){setLoading(false);setLoadError(true);}});};
 
   // ========== LOGIN ==========
   if(!user) return (
@@ -1433,7 +1436,7 @@ export default function App(){
 
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-    {ConnectionBanner()}
+    {loadError&&<div onClick={retryLoad} style={{background:"#fee2e2",borderBottom:"2px solid #dc2626",padding:"8px 16px",fontFamily:F,fontSize:11,color:"#b91c1c",textAlign:"center",cursor:"pointer",fontWeight:600}}>⚠️ Connexion instable — Cliquer ici pour réessayer</div>}
     {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="messages"&&MessagesPg()}{pg==="route"&&RoutePg()}
     {showReject&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowReject(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:440,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
       <h3 style={{fontFamily:F,color:"#dc2626",fontSize:14,fontWeight:800,marginBottom:12}}>🔄 Renvoyer le CR — {showReject.pmCode||showReject.pm_code}</h3>
