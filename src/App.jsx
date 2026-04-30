@@ -1199,10 +1199,14 @@ export default function App(){
     {/* Cartographies in CR tab */}
     {(()=>{const myC=isT?cartos.filter(c=>c.tech===tName):cartos;const fc=myC.filter(c=>{const ms=!histSearch||(c.pm_code||"").toLowerCase().includes(histSearch.toLowerCase())||(c.tech||"").toLowerCase().includes(histSearch.toLowerCase());const md=!histDateFrom||c.date>=histDateFrom;const mt=!histDateTo||c.date<=histDateTo;return ms&&md&&mt;});return fc.length>0?<div style={{marginTop:20}}>
       <h3 style={{fontFamily:F,fontSize:14,fontWeight:800,color:"#7c3aed",marginBottom:8}}>🗺️ Cartographies ({fc.length})</h3>
-      {fc.map(c=><div key={c.id} style={{...crd,borderLeft:"4px solid #7c3aed",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
-        <div><span style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{c.pm_code}</span><span style={{fontFamily:F,fontSize:10,color:CL.sb,marginLeft:8}}>👷 {c.tech}</span></div>
+      {fc.map(c=>{const done=!!c.h1&&!!c.h2;const started=!!c.h1&&!c.h2;return(<div key={c.id} style={{...crd,borderLeft:`4px solid ${done?"#059669":started?"#f59e0b":"#7c3aed"}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
+        <div><span style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{c.pm_code}</span><span style={{fontFamily:F,fontSize:10,color:CL.sb,marginLeft:8}}>👷 {c.tech}</span>
+        {done&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#dcfce7",color:"#059669",fontFamily:F,fontSize:8,fontWeight:700}}>✅ Terminée</span>}
+        {started&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#fef3c7",color:"#f59e0b",fontFamily:F,fontSize:8,fontWeight:700}}>🔶 En cours</span>}
+        {!started&&!done&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#f3e8ff",color:"#7c3aed",fontFamily:F,fontSize:8,fontWeight:700}}>📋 À faire</span>}
+        </div>
         <span style={{fontFamily:F,fontSize:10,color:CL.sb}}>{c.date?new Date(c.date).toLocaleDateString("fr-FR"):""}</span>
-      </div>)}
+      </div>);})}
     </div>:null;})()}
     </div>);
   };
@@ -1540,8 +1544,15 @@ export default function App(){
   // Simple carto view inline in Hist
   const viewCartoReport=async(c)=>{
     const{data}=await supabase.from("cartographies").select("*").eq("id",c.id).single();
-    if(data)setViewCarto(data);
-    setPg("viewCarto");
+    if(!data)return;
+    if(isT){
+      // Tech opens the form to fill/start the intervention
+      startCartoFromExisting(data);
+    }else{
+      // Manager opens consultation view
+      setViewCarto(data);
+      setPg("viewCarto");
+    }
   };
 
   const ViewCartoPage=()=>{
@@ -1658,13 +1669,16 @@ export default function App(){
         <div style={{fontFamily:F,fontSize:12,color:CL.sb,display:"flex",alignItems:"center"}}>{filteredCartos.length} cartographie(s)</div>
       </div>
       {filteredCartos.length===0?<div style={{textAlign:"center",padding:40,color:CL.sb,fontFamily:F}}>📭 Aucune cartographie.</div>:
-        filteredCartos.map(c=><div key={c.id} style={{...crd,borderLeft:"4px solid #7c3aed",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
+        filteredCartos.map(c=>{const done=!!c.h1&&!!c.h2;const started=!!c.h1&&!c.h2;return(<div key={c.id} style={{...crd,borderLeft:`4px solid ${done?"#059669":started?"#f59e0b":"#7c3aed"}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
           <div>
             <span style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{c.pm_code}</span>
             <span style={{fontFamily:F,fontSize:10,color:CL.sb,marginLeft:8}}>👷 {c.tech}</span>
+            {done&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#dcfce7",color:"#059669",fontFamily:F,fontSize:8,fontWeight:700}}>✅ Terminée</span>}
+            {started&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#fef3c7",color:"#f59e0b",fontFamily:F,fontSize:8,fontWeight:700}}>🔶 En cours</span>}
+            {!started&&!done&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#f3e8ff",color:"#7c3aed",fontFamily:F,fontSize:8,fontWeight:700}}>📋 À faire</span>}
           </div>
           <span style={{fontFamily:F,fontSize:10,color:CL.sb}}>{c.date?new Date(c.date).toLocaleDateString("fr-FR"):""}</span>
-        </div>)
+        </div>);})
       }
     </div>);
   };
