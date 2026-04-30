@@ -64,6 +64,9 @@ export default function App(){
   const [rejectPresets,setRejectPresets]=useState([]);
   const [rejectCustom,setRejectCustom]=useState("");
   const [messages,setMessages]=useState([]); // {message, count} or null
+  const [cartos,setCartos]=useState([]); // cartographies
+  const [cartoForm,setCartoForm]=useState(null); // current cartographie form
+  const [viewCarto,setViewCarto]=useState(null); // viewing a cartographie
   const fileRef=useRef(null);
   const impRef=useRef(null);
   const msaRef=useRef(null);
@@ -143,6 +146,8 @@ export default function App(){
         supabase.from("notifications").select("*").eq("read",false).order("created_at",{ascending:false}),
         supabase.from("messages").select("*").order("created_at",{ascending:false}),
       ]);
+      // Cartographies — loaded separately to avoid crashing if table doesn't exist yet
+      try{const{data:cartoData}=await supabase.from("cartographies").select("id,pm_code,tech,date,obs,created_at").order("created_at",{ascending:false});if(cartoData)setCartos(cartoData);}catch{}
       if(pmData) setPms(pmData.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nbIW:p.nb_iw,lat:p.lat,lng:p.lng,resolved:!!p.resolved,resolved_at:p.resolved_at||null,resolved_reason:p.resolved_reason||null})));
       if(techData){setTechs(techData);setLocalCodes(prev=>{const o={...prev};techData.forEach(t=>{if(!(t.name in o))o[t.name]=t.code||"";});return o;});}
       if(repData) setReps(repData.map(r=>({...r,pmCode:r.pm_code,pmAdresse:r.pm_adresse,pmDept:r.pm_dept,nbCli:r.nb_cli,suiviTxt:r.suivi_txt})));
@@ -806,6 +811,7 @@ export default function App(){
         {isT&&<button onClick={()=>{setPg("dash");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="dash"?CL.a:"rgba(255,255,255,.06)",color:pg==="dash"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🏗️ Mes PM</button>}
         <button onClick={()=>{setPg("hist");setViewR(null);setSearch("");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="hist"?CL.a:"rgba(255,255,255,.06)",color:pg==="hist"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>📋 CR</button>
         <button onClick={()=>{setPg("route");setShowRoute(false);}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="route"?CL.a:"rgba(255,255,255,.06)",color:pg==="route"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Tournée</button>
+        <button onClick={()=>setPg("cartoList")} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="cartoList"||pg==="cartoForm"||pg==="viewCarto"?"#7c3aed":"rgba(255,255,255,.06)",color:pg==="cartoList"||pg==="cartoForm"||pg==="viewCarto"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>🗺️ Carto{cartos.length>0?` (${cartos.length})`:""}</button>
         {isT&&(()=>{const unread=messages.filter(m=>m.tech_name===tName&&!m.read).length;return <button onClick={()=>setPg("messages")} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="messages"?CL.a:"rgba(255,255,255,.06)",color:pg==="messages"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer",position:"relative"}}>💬 Messages{unread>0&&<span style={{position:"absolute",top:-4,right:-4,width:16,height:16,borderRadius:"50%",background:"#dc2626",color:"#fff",fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{unread}</span>}</button>;})()}
         {isM&&(()=>{const pendingCR=reps.filter(r=>r.validation==="pending").length;const unreadMgr=messages.filter(m=>m.type==="resubmission"&&!m.read).length;const total=pendingCR+unreadMgr;return <button onClick={()=>setPg("messages")} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="messages"?CL.a:"rgba(255,255,255,.06)",color:pg==="messages"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer",position:"relative"}}>💬 Suivi{total>0&&<span style={{position:"absolute",top:-4,right:-4,width:16,height:16,borderRadius:"50%",background:"#dc2626",color:"#fff",fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{total}</span>}</button>;})()}
         {isM&&<button onClick={()=>{setPg("team");}} style={{padding:"5px 10px",borderRadius:4,border:"none",background:pg==="team"?CL.a:"rgba(255,255,255,.06)",color:pg==="team"?"#fff":CL.wm,fontFamily:F,fontSize:10,fontWeight:700,cursor:"pointer"}}>👷 Équipe</button>}
@@ -873,6 +879,7 @@ export default function App(){
             {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?.tech?<><B color="purple">{assigns[pm.code].tech}</B><button onClick={()=>{setShowAss(pm.code);setAssTypes(assigns[pm.code]?.types||[]);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>{setShowAss(pm.code);setAssTypes([]);}} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
             <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
               <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9,position:"relative"}}>{hasDraft(pm.code)?"📝 Reprendre":"+CR"}</button>
+              <button onClick={()=>startCarto(pm)} style={{...b1,padding:"3px 7px",fontSize:9,background:"#7c3aed"}}>🗺️</button>
               {isM&&<button onClick={()=>{setShowIWPanel(pm.code);setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);}} style={{...b2,padding:"2px 5px",fontSize:8,color:iwForPM(pm.code).length>0?"#059669":"#7c3aed",borderColor:iwForPM(pm.code).length>0?"#86efac":"#c4b5fd"}}>{iwForPM(pm.code).length>0?`📋${iwForPM(pm.code).length}`:"📋+"}</button>}
               {pm.lat?<button onClick={()=>openWaze(pm.lat,pm.lng)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#33ccff",borderColor:"#33ccff"}}>📍</button>
               :<button onClick={()=>openMapsAddr(pm.adresse)} style={{...b2,padding:"2px 5px",fontSize:8}}>📍</button>}
@@ -1191,8 +1198,6 @@ export default function App(){
         </div>);})}
     </div>);
   };
-
-  // ========== TEAM ==========
   const Team=()=>{
     const handleCodeChange=(name,val)=>{setLocalCodes(prev=>({...prev,[name]:val}));};
     const handleCodeBlur=(name)=>{const code=localCodes[name]||"";updateTechCode(name,code);};
@@ -1390,6 +1395,189 @@ export default function App(){
     </div>);
   };
 
+  // ========== CARTOGRAPHIE ==========
+  const ETAT_POS=["","Occupé","Libre","HS"];
+  const etatColor={Occupé:"#059669",Libre:"#6b7280",HS:"#dc2626"};
+  const PENALITE_MOTIFS=["Non conforme STAS","Mauvaise position","Jarretière non conforme","Connecteur sale","Fibre mal lovée","Étiquetage manquant"];
+
+  const startCarto=(pm)=>{
+    setCartoForm({pmCode:pm.code,pmAdresse:pm.adresse,pmDept:pm.dept,tech:isT?tName:"",date:new Date().toISOString().slice(0,10),coupleurs:[{num:1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false}))}],photos:[],obs:""});
+    setPg("cartoForm");
+  };
+
+  const submitCarto=async()=>{
+    if(submitting)return;setSubmitting(true);
+    try{
+      const id=`carto_${Date.now()}`;
+      // Compress photos before sending
+      let photos=cartoForm.photos||[];
+      if(photos.length>0){photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));}
+      const row={id,pm_code:cartoForm.pmCode,tech:cartoForm.tech,date:cartoForm.date,coupleurs:cartoForm.coupleurs,photos,obs:cartoForm.obs};
+      const{error}=await supabase.from("cartographies").insert(row);
+      if(error){alert("❌ Erreur : "+error.message);return;}
+      setCartos(prev=>[{...row,created_at:new Date().toISOString()},...prev]);
+      setCartoForm(null);setPg("cartoList");
+    }finally{setSubmitting(false);}
+  };
+
+  const CartoFormPg=()=>{
+    if(!cartoForm)return null;
+    const cf=cartoForm;
+    return(<div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
+      <button onClick={()=>setPg("cartoList")} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
+      <div style={{...crd,borderLeft:`4px solid #7c3aed`}}>
+        <h2 style={{fontFamily:F,fontSize:18,fontWeight:800,color:CL.dk,marginBottom:4}}>🗺️ Cartographie PM</h2>
+        <div style={{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"#7c3aed"}}>{cf.pmCode}</div>
+        <div style={{fontFamily:F,fontSize:11,color:CL.sb}}>{cf.pmAdresse}</div>
+        <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:4}}>👷 {cf.tech} · {cf.date}</div>
+      </div>
+
+      {cf.coupleurs.map((cpl,ci)=>(
+        <div key={ci} style={{...crd,marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <h3 style={{fontFamily:F,fontSize:14,fontWeight:800,color:"#7c3aed"}}>Coupleur {cpl.num}</h3>
+            <div style={{fontFamily:F,fontSize:10,color:CL.sb}}>
+              <span style={{color:"#059669",fontWeight:700}}>{cpl.positions.filter(p=>p.etat==="Occupé").length} occupés</span> · {cpl.positions.filter(p=>p.etat==="Libre").length} libres · <span style={{color:"#dc2626",fontWeight:700}}>{cpl.positions.filter(p=>p.etat==="HS").length} HS</span> · <span style={{color:"#f59e0b",fontWeight:700}}>⚠️ {cpl.positions.filter(p=>p.penalite).length} pénalités</span>{cpl.positions.filter(p=>p.corrige).length>0&&<span style={{color:"#059669",fontWeight:700}}> · ✅ {cpl.positions.filter(p=>p.corrige).length} corrigés</span>}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:4}}>
+            {cpl.positions.map((pos,pi)=>(
+              <div key={pi} style={{border:`2px solid ${pos.penalite?"#f59e0b":pos.etat?etatColor[pos.etat]||CL.bd:CL.bd}`,borderRadius:8,padding:6,background:pos.penalite?"#fef3c7":pos.etat==="Occupé"?"#f0fdf4":pos.etat==="HS"?"#fef2f2":"#fff",textAlign:"center"}}>
+                <div style={{fontFamily:F,fontSize:12,fontWeight:800,color:CL.dk,marginBottom:4}}>{pos.pos}</div>
+                <input value={pos.oc} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].oc=e.target.value;setCartoForm(f=>({...f,coupleurs:nc}));}} placeholder="OC" style={{...inp,fontSize:9,padding:"2px 3px",textAlign:"center",marginBottom:3,width:"100%"}}/>
+                <select value={pos.etat} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].etat=e.target.value;setCartoForm(f=>({...f,coupleurs:nc}));}} style={{...inp,fontSize:8,padding:"2px 2px",width:"100%",color:pos.etat?etatColor[pos.etat]:CL.sb,fontWeight:700}}>
+                  {ETAT_POS.map(e=><option key={e} value={e}>{e||"—"}</option>)}
+                </select>
+                <div style={{marginTop:3}}>
+                  <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:2,cursor:"pointer"}}>
+                    <input type="checkbox" checked={!!pos.penalite} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].penalite=e.target.checked;if(!e.target.checked){nc[ci].positions[pi].penMotif="";nc[ci].positions[pi].corrige=false;}setCartoForm(f=>({...f,coupleurs:nc}));}} style={{width:10,height:10,accentColor:"#f59e0b"}}/>
+                    <span style={{fontFamily:F,fontSize:7,color:"#f59e0b",fontWeight:700}}>Pénalité</span>
+                  </label>
+                  {pos.penalite&&<select value={pos.penMotif||""} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].penMotif=e.target.value;setCartoForm(f=>({...f,coupleurs:nc}));}} style={{...inp,fontSize:7,padding:"1px 2px",width:"100%",color:"#f59e0b",fontWeight:600,marginTop:2}}>
+                    <option value="">Motif...</option>
+                    {PENALITE_MOTIFS.map(m=><option key={m} value={m}>{m}</option>)}
+                  </select>}
+                  {pos.penalite&&<label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:2,cursor:"pointer",marginTop:3}}>
+                    <input type="checkbox" checked={!!pos.corrige} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].corrige=e.target.checked;setCartoForm(f=>({...f,coupleurs:nc}));}} style={{width:10,height:10,accentColor:"#059669"}}/>
+                    <span style={{fontFamily:F,fontSize:7,color:pos.corrige?"#059669":"#dc2626",fontWeight:700}}>{pos.corrige?"✅ Corrigé":"❌ Non corrigé"}</span>
+                  </label>}
+                </div>
+              </div>
+            ))}
+          </div>
+          {cf.coupleurs.length>1&&<button onClick={()=>setCartoForm(f=>({...f,coupleurs:f.coupleurs.filter((_,j)=>j!==ci)}))} style={{...b2,marginTop:8,fontSize:9,color:"#dc2626",borderColor:"#fca5a5"}}>🗑️ Supprimer ce coupleur</button>}
+        </div>
+      ))}
+
+      <button onClick={()=>setCartoForm(f=>({...f,coupleurs:[...f.coupleurs,{num:f.coupleurs.length+1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false}))}]}))} style={{...b2,width:"100%",marginTop:12,padding:12,fontSize:12,color:"#7c3aed",borderColor:"#c4b5fd"}}>+ Ajouter un coupleur</button>
+
+      <div style={{...crd,marginTop:12}}><h3 style={sT}>📸 Photos (preuves pénalités)</h3>
+        <div style={{border:`2px dashed #7c3aed`,borderRadius:12,padding:16,textAlign:"center",cursor:"pointer",position:"relative"}} onClick={()=>document.getElementById("cartoPhotoInput")?.click()}>
+          <div style={{fontFamily:F,color:"#7c3aed",fontWeight:700}}>📷 Prendre / ajouter photos</div>
+          <input id="cartoPhotoInput" type="file" accept="image/*" multiple onChange={e=>{Array.from(e.target.files).forEach(f=>{const rd=new FileReader();rd.onload=async ev=>{const compressed=await compressForStorage(ev.target.result);setCartoForm(fm=>({...fm,photos:[...(fm.photos||[]),{data:compressed,label:""}]}));};rd.readAsDataURL(f);});e.target.value="";}} style={{display:"none"}}/>
+        </div>
+        {cf.photos?.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:8}}>{cf.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><div style={{position:"relative"}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",display:"block",cursor:"pointer"}} onClick={()=>openLightbox(cf.photos,i)}/><button onClick={()=>setCartoForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{position:"absolute",top:2,right:2,width:18,height:18,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:10,cursor:"pointer"}}>✕</button></div><input value={p.label} onChange={e=>{const ph=[...cf.photos];ph[i]={...ph[i],label:e.target.value};setCartoForm(f=>({...f,photos:ph}));}} placeholder="Légende" style={{...inp,fontSize:9,padding:"2px 4px"}}/></div>)}</div>}
+      </div>
+
+      <div style={{marginTop:12}}><label style={lbl}>Observations</label><textarea value={cf.obs} onChange={e=>setCartoForm(f=>({...f,obs:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></div>
+
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30}}>
+        <button onClick={()=>{setCartoForm(null);setPg("cartoList");}} style={b2}>Annuler</button>
+        <button onClick={submitCarto} disabled={submitting} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:submitting?.4:1}}>{submitting?"⏳ Envoi...":"🗺️ Enregistrer la cartographie"}</button>
+      </div>
+    </div>);
+  };
+
+  // Simple carto view inline in Hist
+  const viewCartoReport=async(c)=>{
+    const{data}=await supabase.from("cartographies").select("*").eq("id",c.id).single();
+    if(data)setViewCarto(data);
+    setPg("viewCarto");
+  };
+
+  const ViewCartoPage=()=>{
+    const c=viewCarto;if(!c)return null;
+    const coupleurs=c.coupleurs||[];
+    return(<div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
+      <button onClick={()=>{setViewCarto(null);setPg("cartoList");}} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
+      <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div>
+            <h2 style={{fontFamily:F,fontSize:18,fontWeight:800,color:CL.dk}}>🗺️ Cartographie</h2>
+            <div style={{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"#7c3aed"}}>{c.pm_code}</div>
+          </div>
+          <div style={{textAlign:"right",fontFamily:F,fontSize:11,color:CL.sb}}>
+            <div>👷 {c.tech}</div>
+            <div>{c.date?new Date(c.date).toLocaleDateString("fr-FR"):""}</div>
+          </div>
+        </div>
+      </div>
+
+      {coupleurs.map((cpl,ci)=>{
+        const occ=cpl.positions?.filter(p=>p.etat==="Occupé").length||0;
+        const libre=cpl.positions?.filter(p=>p.etat==="Libre").length||0;
+        const hs=cpl.positions?.filter(p=>p.etat==="HS").length||0;
+        const pen=cpl.positions?.filter(p=>p.penalite).length||0;
+        return(<div key={ci} style={{...crd,marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <h3 style={{fontFamily:F,fontSize:14,fontWeight:800,color:"#7c3aed"}}>Coupleur {cpl.num}</h3>
+            <div style={{fontFamily:F,fontSize:10}}>
+              <span style={{color:"#059669",fontWeight:700}}>Occupés: {occ}</span> · <span style={{color:"#6b7280"}}>Libres: {libre}</span> · <span style={{color:"#dc2626",fontWeight:700}}>HS: {hs}</span>{pen>0&&<span style={{color:"#f59e0b",fontWeight:700}}> · ⚠️ {pen}</span>}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:4}}>
+            {(cpl.positions||[]).map((pos,pi)=>(
+              <div key={pi} style={{border:`2px solid ${pos.penalite?"#f59e0b":pos.etat?etatColor[pos.etat]||CL.bd:"#e5e7eb"}`,borderRadius:8,padding:6,background:pos.penalite?"#fef3c7":pos.etat==="Occupé"?"#f0fdf4":pos.etat==="HS"?"#fef2f2":"#fff",textAlign:"center"}}>
+                <div style={{fontFamily:F,fontSize:12,fontWeight:800,color:CL.dk}}>{pos.pos}</div>
+                {pos.oc&&<div style={{fontFamily:"monospace",fontSize:8,color:"#7c3aed",fontWeight:700,marginTop:2}}>{pos.oc}</div>}
+                {pos.etat&&<div style={{fontFamily:F,fontSize:7,fontWeight:700,color:etatColor[pos.etat],marginTop:2}}>{pos.etat.toUpperCase()}</div>}
+                {pos.penalite&&<div style={{fontFamily:F,fontSize:6,fontWeight:700,color:"#f59e0b",marginTop:2}}>⚠️ {pos.penMotif||"Pénalité"}</div>}
+                {pos.corrige&&<div style={{fontFamily:F,fontSize:6,fontWeight:700,color:"#059669",marginTop:1}}>✅ Corrigé</div>}
+              </div>
+            ))}
+          </div>
+        </div>);
+      })}
+      {c.obs&&<div style={{...crd,marginTop:12}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:12,whiteSpace:"pre-wrap"}}>{c.obs}</div></div>}
+      {c.photos?.length>0&&<div style={{...crd,marginTop:12}}><div style={lbl}>📸 Photos preuves ({c.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:8}}>{c.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",cursor:"pointer"}} onClick={()=>openLightbox(c.photos,i)}/>{p.label&&<div style={{fontFamily:F,fontSize:9,padding:"2px 4px",color:CL.sb}}>{p.label}</div>}</div>)}</div></div>}
+    </div>);
+  };
+
+  // ========== CARTOGRAPHIE LIST PAGE ==========
+  const [cartoSearch,setCartoSearch]=useState("");
+  const CartoListPg=()=>{
+    const myCartos=isT?cartos.filter(c=>c.tech===tName):cartos;
+    const filteredCartos=myCartos.filter(c=>!cartoSearch||(c.pm_code||"").toLowerCase().includes(cartoSearch.toLowerCase())||(c.tech||"").toLowerCase().includes(cartoSearch.toLowerCase()));
+    const myPmsForCarto=isT?activePms.filter(pm=>assigns[pm.code]?.tech===tName):activePms;
+    return(<div style={{padding:16,maxWidth:900}}>
+      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:14}}>🗺️ Cartographies PM</h2>
+      <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:8}}>+ Nouvelle cartographie</h3>
+        <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Sélectionnez un PM pour démarrer une cartographie</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <select id="cartoSelectPM" style={{...inp,flex:1,maxWidth:300}} defaultValue="">
+            <option value="" disabled>Choisir un PM...</option>
+            {myPmsForCarto.map(pm=><option key={pm.code} value={pm.code}>{pm.code} — {pm.adresse?.slice(0,40)}</option>)}
+          </select>
+          <button onClick={()=>{const sel=document.getElementById("cartoSelectPM")?.value;if(!sel){alert("Sélectionnez un PM");return;}const pm=pms.find(p=>p.code===sel);if(pm)startCarto(pm);}} style={{...b1,padding:"8px 16px",background:"#7c3aed"}}>🗺️ Démarrer</button>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:16,marginBottom:12}}>
+        <input value={cartoSearch} onChange={e=>setCartoSearch(e.target.value)} placeholder="🔍 PM, tech..." style={{...inp,maxWidth:240}}/>
+        <div style={{fontFamily:F,fontSize:12,color:CL.sb,display:"flex",alignItems:"center"}}>{filteredCartos.length} cartographie(s)</div>
+      </div>
+      {filteredCartos.length===0?<div style={{textAlign:"center",padding:40,color:CL.sb,fontFamily:F}}>📭 Aucune cartographie.</div>:
+        filteredCartos.map(c=><div key={c.id} style={{...crd,borderLeft:"4px solid #7c3aed",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
+          <div>
+            <span style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{c.pm_code}</span>
+            <span style={{fontFamily:F,fontSize:10,color:CL.sb,marginLeft:8}}>👷 {c.tech}</span>
+          </div>
+          <span style={{fontFamily:F,fontSize:10,color:CL.sb}}>{c.date?new Date(c.date).toLocaleDateString("fr-FR"):""}</span>
+        </div>)
+      }
+    </div>);
+  };
+
   // ========== ROUTE / TOURNÉE ==========
   const RoutePg=()=>{
     const techsWithPms=isM?[...new Set(Object.values(assigns).map(a=>a.tech).filter(Boolean))]:[];
@@ -1449,7 +1637,7 @@ export default function App(){
   return(<div style={{fontFamily:F,background:CL.bg,minHeight:"100vh"}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
     {loadError&&<div onClick={retryLoad} style={{background:"#fee2e2",borderBottom:"2px solid #dc2626",padding:"8px 16px",fontFamily:F,fontSize:11,color:"#b91c1c",textAlign:"center",cursor:"pointer",fontWeight:600}}>⚠️ Connexion instable — Cliquer ici pour réessayer</div>}
-    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="messages"&&MessagesPg()}{pg==="route"&&RoutePg()}
+    {Head()}{pg==="dash"&&Dash()}{pg==="import"&&isM&&ImportPg()}{pg==="form"&&FormCR()}{pg==="ok"&&OkPg()}{pg==="hist"&&Hist()}{pg==="team"&&isM&&Team()}{pg==="resolved"&&isM&&ResolvedPg()}{pg==="messages"&&MessagesPg()}{pg==="route"&&RoutePg()}{pg==="cartoList"&&CartoListPg()}{pg==="cartoForm"&&CartoFormPg()}{pg==="viewCarto"&&ViewCartoPage()}
     {showReject&&isM&&(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowReject(null)}><div style={{background:"#fff",borderRadius:12,padding:20,width:440,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
       <h3 style={{fontFamily:F,color:"#dc2626",fontSize:14,fontWeight:800,marginBottom:12}}>🔄 Renvoyer le CR — {showReject.pmCode||showReject.pm_code}</h3>
       <div style={{...lbl,marginBottom:6}}>Motifs prédéfinis</div>
