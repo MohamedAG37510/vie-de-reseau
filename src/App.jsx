@@ -1457,7 +1457,7 @@ export default function App(){
     return(<div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
       <button onClick={()=>setPg("cartoList")} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
       <div style={{...crd,borderLeft:`4px solid #7c3aed`}}>
-        <h2 style={{fontFamily:F,fontSize:18,fontWeight:800,color:CL.dk,marginBottom:4}}>🗺️ Cartographie PM</h2>
+        <h2 style={{fontFamily:F,fontSize:18,fontWeight:800,color:CL.dk,marginBottom:4}}>🗺️ Remise en conformité PM</h2>
         <div style={{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"#7c3aed"}}>{cf.pmCode}</div>
         <div style={{fontFamily:F,fontSize:11,color:CL.sb}}>{cf.pmAdresse}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:10}}>
@@ -1466,10 +1466,14 @@ export default function App(){
           <div><div style={lbl}>Départ</div><div style={{...inp,background:cf.h2?"#fef2f2":"#f4f3ef",fontWeight:700,color:cf.h2?"#dc2626":CL.sb}}>{cf.h2||"—"}</div></div>
         </div>
         {isM&&<div style={{marginTop:10}}><div style={lbl}>Technicien affecté *</div><select value={cf.tech} onChange={e=>setCartoForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">Sélectionner...</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>}
-        {isM&&<div style={{marginTop:10}}><div style={lbl}>⚠️ Positions prestataire (soumises à pénalités)</div><input value={cf.prestatairePositions} onChange={e=>setCartoForm(f=>({...f,prestatairePositions:e.target.value}))} placeholder="Ex: 3,5,12,27 (séparées par des virgules)" style={{...inp,fontFamily:"monospace",color:"#f59e0b",fontWeight:700}}/><div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:2}}>Positions brassées par les prestataires précédents — le tech les verra en priorité</div></div>}
+        {isM&&<div style={{marginTop:10}}><div style={lbl}>⚠️ Positions prestataire (soumises à pénalités)</div><div style={{fontFamily:F,fontSize:9,color:CL.sb,marginBottom:6}}>Cochez les positions brassées par les prestataires — le tech les verra en priorité</div><div style={{display:"grid",gridTemplateColumns:"repeat(16,1fr)",gap:2}}>{Array.from({length:32},(_,i)=>{const n=i+1;const checked=(cf.prestatairePositions||"").split(",").map(s=>parseInt(s.trim())).includes(n);return<div key={n} onClick={()=>{const current=(cf.prestatairePositions||"").split(",").map(s=>parseInt(s.trim())).filter(x=>!isNaN(x));const next=checked?current.filter(x=>x!==n):[...current,n].sort((a,b)=>a-b);setCartoForm(f=>({...f,prestatairePositions:next.join(",")}));}} style={{padding:"4px 2px",borderRadius:6,border:`2px solid ${checked?"#f59e0b":"#e5e7eb"}`,background:checked?"#fef3c7":"#fff",textAlign:"center",cursor:"pointer",fontFamily:F,fontSize:10,fontWeight:checked?800:400,color:checked?"#f59e0b":"#999"}}>{n}</div>})}</div></div>}
         {isT&&cf.prestatairePositions&&<div style={{marginTop:10,padding:8,borderRadius:8,background:"#fef3c7",border:"1.5px solid #f59e0b"}}><div style={{fontFamily:F,fontSize:11,fontWeight:700,color:"#92400e"}}>⚠️ Positions prestataire à vérifier en priorité : <span style={{fontFamily:"monospace",fontSize:13}}>{cf.prestatairePositions}</span></div></div>}
       </div>
-      {!cf.editId&&!cf.h1&&<div style={{textAlign:"center",padding:20}}><button onClick={()=>setCartoForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#059669",boxShadow:"0 4px 16px rgba(5,150,105,.3)"}}>▶ Démarrer l'intervention</button><div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:8}}>Cliquez pour enregistrer l'heure d'arrivée</div></div>}
+      {!cf.editId&&!cf.h1&&<div style={{textAlign:"center",padding:20}}>
+        {!cf.tech&&<div style={{fontFamily:F,fontSize:12,color:"#dc2626",fontWeight:700,marginBottom:12}}>⚠️ Sélectionnez un technicien avant de démarrer</div>}
+        <button onClick={()=>{if(!cf.tech){alert("Veuillez affecter un technicien");return;}setCartoForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}));}} disabled={!cf.tech} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#059669",boxShadow:"0 4px 16px rgba(5,150,105,.3)",opacity:cf.tech?1:.4,cursor:cf.tech?"pointer":"not-allowed"}}>▶ Démarrer l'intervention</button>
+        <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:8}}>Cliquez pour enregistrer l'heure d'arrivée</div>
+      </div>}
 
       {(cf.h1||cf.editId)&&cf.coupleurs.map((cpl,ci)=>{
       const prestPos=(cf.prestatairePositions||"").split(",").map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
@@ -1559,7 +1563,7 @@ export default function App(){
       <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <h2 style={{fontFamily:F,fontSize:18,fontWeight:800,color:CL.dk}}>🗺️ Cartographie</h2>
+            <h2 style={{fontFamily:F,fontSize:18,fontWeight:800,color:CL.dk}}>🗺️ Remise en conformité</h2>
             <div style={{fontFamily:"monospace",fontSize:14,fontWeight:700,color:"#7c3aed"}}>{c.pm_code}</div>
           </div>
           <div style={{textAlign:"right",fontFamily:F,fontSize:11,color:CL.sb}}>
@@ -1618,9 +1622,9 @@ export default function App(){
     const filteredCartos=myCartos.filter(c=>!cartoSearch||(c.pm_code||"").toLowerCase().includes(cartoSearch.toLowerCase())||(c.tech||"").toLowerCase().includes(cartoSearch.toLowerCase()));
     const myPmsForCarto=isT?activePms.filter(pm=>assigns[pm.code]?.tech===tName):activePms;
     return(<div style={{padding:16,maxWidth:900}}>
-      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:14}}>🗺️ Cartographies PM</h2>
+      <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:14}}>🗺️ Remise en conformité PM</h2>
       <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
-        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:8}}>+ Nouvelle cartographie</h3>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:8}}>+ Nouvelle intervention remise en conformité</h3>
         <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Sélectionnez un PM existant ou saisissez un code PM manuellement</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
           <div style={{flex:1,minWidth:200}}>
