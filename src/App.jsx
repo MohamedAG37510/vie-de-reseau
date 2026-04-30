@@ -1196,6 +1196,14 @@ export default function App(){
           </div>
           {isM&&<button onClick={e=>{e.stopPropagation();delR(r.id);}} style={{...b2,padding:"3px 6px",fontSize:9,color:"#dc2626"}}>🗑️</button>}
         </div>);})}
+    {/* Cartographies in CR tab */}
+    {(()=>{const myC=isT?cartos.filter(c=>c.tech===tName):cartos;const fc=myC.filter(c=>{const ms=!histSearch||(c.pm_code||"").toLowerCase().includes(histSearch.toLowerCase())||(c.tech||"").toLowerCase().includes(histSearch.toLowerCase());const md=!histDateFrom||c.date>=histDateFrom;const mt=!histDateTo||c.date<=histDateTo;return ms&&md&&mt;});return fc.length>0?<div style={{marginTop:20}}>
+      <h3 style={{fontFamily:F,fontSize:14,fontWeight:800,color:"#7c3aed",marginBottom:8}}>🗺️ Cartographies ({fc.length})</h3>
+      {fc.map(c=><div key={c.id} style={{...crd,borderLeft:"4px solid #7c3aed",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
+        <div><span style={{fontFamily:"monospace",fontSize:12,fontWeight:800}}>{c.pm_code}</span><span style={{fontFamily:F,fontSize:10,color:CL.sb,marginLeft:8}}>👷 {c.tech}</span></div>
+        <span style={{fontFamily:F,fontSize:10,color:CL.sb}}>{c.date?new Date(c.date).toLocaleDateString("fr-FR"):""}</span>
+      </div>)}
+    </div>:null;})()}
     </div>);
   };
   const Team=()=>{
@@ -1408,14 +1416,22 @@ export default function App(){
   const submitCarto=async()=>{
     if(submitting)return;setSubmitting(true);
     try{
-      const id=`carto_${Date.now()}`;
-      // Compress photos before sending
       let photos=cartoForm.photos||[];
       if(photos.length>0){photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));}
-      const row={id,pm_code:cartoForm.pmCode,tech:cartoForm.tech,date:cartoForm.date,coupleurs:cartoForm.coupleurs,photos,obs:cartoForm.obs};
-      const{error}=await supabase.from("cartographies").insert(row);
-      if(error){alert("❌ Erreur : "+error.message);return;}
-      setCartos(prev=>[{...row,created_at:new Date().toISOString()},...prev]);
+      if(cartoForm.editId){
+        // Update existing
+        const updates={coupleurs:cartoForm.coupleurs,photos,obs:cartoForm.obs,tech:cartoForm.tech,date:cartoForm.date};
+        const{error}=await supabase.from("cartographies").update(updates).eq("id",cartoForm.editId);
+        if(error){alert("❌ Erreur : "+error.message);return;}
+        setCartos(prev=>prev.map(c=>c.id===cartoForm.editId?{...c,...updates}:c));
+      }else{
+        // Create new
+        const id=`carto_${Date.now()}`;
+        const row={id,pm_code:cartoForm.pmCode,tech:cartoForm.tech,date:cartoForm.date,coupleurs:cartoForm.coupleurs,photos,obs:cartoForm.obs};
+        const{error}=await supabase.from("cartographies").insert(row);
+        if(error){alert("❌ Erreur : "+error.message);return;}
+        setCartos(prev=>[{...row,created_at:new Date().toISOString()},...prev]);
+      }
       setCartoForm(null);setPg("cartoList");
     }finally{setSubmitting(false);}
   };
@@ -1483,7 +1499,7 @@ export default function App(){
 
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30}}>
         <button onClick={()=>{setCartoForm(null);setPg("cartoList");}} style={b2}>Annuler</button>
-        <button onClick={submitCarto} disabled={submitting} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:submitting?.4:1}}>{submitting?"⏳ Envoi...":"🗺️ Enregistrer la cartographie"}</button>
+        <button onClick={submitCarto} disabled={submitting} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:submitting?.4:1}}>{submitting?"⏳ Envoi...":(cf.editId?"💾 Enregistrer les modifications":"🗺️ Enregistrer la cartographie")}</button>
       </div>
     </div>);
   };
@@ -1499,7 +1515,20 @@ export default function App(){
     const c=viewCarto;if(!c)return null;
     const coupleurs=c.coupleurs||[];
     return(<div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
-      <button onClick={()=>{setViewCarto(null);setPg("cartoList");}} style={{...b2,marginBottom:12,fontSize:11}}>← Retour</button>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        <button onClick={()=>{setViewCarto(null);setPg("cartoList");}} style={{...b2,fontSize:11}}>← Retour</button>
+        <button onClick={()=>{
+          // Edit: load full carto into form
+          setCartoForm({pmCode:c.pm_code,pmAdresse:"",pmDept:"",tech:c.tech,date:c.date,coupleurs:c.coupleurs||[{num:1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false}))}],photos:c.photos||[],obs:c.obs||"",editId:c.id});
+          setViewCarto(null);setPg("cartoForm");
+        }} style={{...b1,fontSize:11,padding:"6px 14px",background:"#7c3aed"}}>✏️ Modifier</button>
+        <button onClick={async()=>{
+          if(!window.confirm("Supprimer cette cartographie ?"))return;
+          await supabase.from("cartographies").delete().eq("id",c.id);
+          setCartos(prev=>prev.filter(x=>x.id!==c.id));
+          setViewCarto(null);setPg("cartoList");
+        }} style={{...b1,fontSize:11,padding:"6px 14px",background:"#dc2626"}}>🗑️ Supprimer</button>
+      </div>
       <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
@@ -1538,6 +1567,18 @@ export default function App(){
           </div>
         </div>);
       })}
+      {/* Résumé des pénalités */}
+      {(()=>{const allPen=[];coupleurs.forEach((cpl,ci)=>(cpl.positions||[]).forEach(pos=>{if(pos.penalite)allPen.push({coupleur:cpl.num,pos:pos.pos,oc:pos.oc,motif:pos.penMotif,corrige:pos.corrige});}));return allPen.length>0?<div style={{...crd,marginTop:12,borderLeft:"4px solid #f59e0b"}}>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#f59e0b",marginBottom:8}}>⚠️ Positions soumises à pénalités ({allPen.length})</h3>
+        <div style={{display:"grid",gridTemplateColumns:"auto auto 1fr 1fr auto",gap:0,fontFamily:F,fontSize:10}}>
+          <div style={{fontWeight:800,color:CL.sb,padding:"4px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>COUPL.</div>
+          <div style={{fontWeight:800,color:CL.sb,padding:"4px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>POS.</div>
+          <div style={{fontWeight:800,color:CL.sb,padding:"4px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>OC</div>
+          <div style={{fontWeight:800,color:CL.sb,padding:"4px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>MOTIF</div>
+          <div style={{fontWeight:800,color:CL.sb,padding:"4px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>ÉTAT</div>
+          {allPen.map((p,i)=><div key={i} style={{display:"contents"}}><div style={{padding:"4px 8px",borderBottom:`1px solid ${CL.bd}`,fontWeight:700}}>C{p.coupleur}</div><div style={{padding:"4px 8px",borderBottom:`1px solid ${CL.bd}`,fontWeight:700}}>{p.pos}</div><div style={{padding:"4px 8px",borderBottom:`1px solid ${CL.bd}`,fontFamily:"monospace",color:"#7c3aed",fontWeight:600}}>{p.oc||"—"}</div><div style={{padding:"4px 8px",borderBottom:`1px solid ${CL.bd}`,color:"#92400e"}}>{p.motif||"—"}</div><div style={{padding:"4px 8px",borderBottom:`1px solid ${CL.bd}`,fontWeight:700,color:p.corrige?"#059669":"#dc2626"}}>{p.corrige?"✅ Corrigé":"❌ Non corrigé"}</div></div>)}
+        </div>
+      </div>:null;})()}
       {c.obs&&<div style={{...crd,marginTop:12}}><div style={lbl}>Observations</div><div style={{fontFamily:F,fontSize:12,whiteSpace:"pre-wrap"}}>{c.obs}</div></div>}
       {c.photos?.length>0&&<div style={{...crd,marginTop:12}}><div style={lbl}>📸 Photos preuves ({c.photos.length})</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:8}}>{c.photos.map((p,i)=><div key={i} style={{borderRadius:6,border:`1px solid ${CL.bd}`,overflow:"hidden"}}><img src={p.data} style={{width:"100%",height:90,objectFit:"cover",cursor:"pointer"}} onClick={()=>openLightbox(c.photos,i)}/>{p.label&&<div style={{fontFamily:F,fontSize:9,padding:"2px 4px",color:CL.sb}}>{p.label}</div>}</div>)}</div></div>}
     </div>);
@@ -1552,13 +1593,34 @@ export default function App(){
       <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:14}}>🗺️ Cartographies PM</h2>
       <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
         <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:8}}>+ Nouvelle cartographie</h3>
-        <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Sélectionnez un PM pour démarrer une cartographie</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <select id="cartoSelectPM" style={{...inp,flex:1,maxWidth:300}} defaultValue="">
-            <option value="" disabled>Choisir un PM...</option>
-            {myPmsForCarto.map(pm=><option key={pm.code} value={pm.code}>{pm.code} — {pm.adresse?.slice(0,40)}</option>)}
-          </select>
-          <button onClick={()=>{const sel=document.getElementById("cartoSelectPM")?.value;if(!sel){alert("Sélectionnez un PM");return;}const pm=pms.find(p=>p.code===sel);if(pm)startCarto(pm);}} style={{...b1,padding:"8px 16px",background:"#7c3aed"}}>🗺️ Démarrer</button>
+        <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Sélectionnez un PM existant ou saisissez un code PM manuellement</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginBottom:2}}>PM importé</div>
+            <select id="cartoSelectPM" style={{...inp}} defaultValue="" onChange={()=>{const v=document.getElementById("cartoSelectPM")?.value;if(v){const el=document.getElementById("cartoManualPM");if(el)el.value="";}}}>
+              <option value="">Choisir un PM...</option>
+              {myPmsForCarto.map(pm=><option key={pm.code} value={pm.code}>{pm.code} — {pm.adresse?.slice(0,40)}</option>)}
+            </select>
+          </div>
+          <div style={{fontFamily:F,fontSize:11,color:CL.sb,fontWeight:700}}>ou</div>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginBottom:2}}>Saisie manuelle</div>
+            <input id="cartoManualPM" placeholder="Code PM (ex: FI-93066-005D)" style={{...inp}} onChange={()=>{const el=document.getElementById("cartoSelectPM");if(el)el.value="";}}/>
+          </div>
+          <button onClick={()=>{
+            const sel=document.getElementById("cartoSelectPM")?.value;
+            const manual=document.getElementById("cartoManualPM")?.value?.trim();
+            if(sel){
+              const pm=pms.find(p=>p.code===sel);
+              if(pm)startCarto(pm);
+            }else if(manual){
+              // Create a virtual PM for manual entry
+              const existingPm=pms.find(p=>p.code===manual);
+              startCarto(existingPm||{code:manual,adresse:"",dept:""});
+            }else{
+              alert("Sélectionnez ou saisissez un code PM");
+            }
+          }} style={{...b1,padding:"8px 16px",background:"#7c3aed"}}>🗺️ Démarrer</button>
         </div>
       </div>
       <div style={{display:"flex",gap:8,marginTop:16,marginBottom:12}}>
