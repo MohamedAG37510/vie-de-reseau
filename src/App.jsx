@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "./supabase.js";
 
 const ETATS=["Bon état général","État moyen - maintenance préventive","Dégradé - intervention nécessaire","Critique - urgent","Vandalisé","Inaccessible"];
-const TYPES=["SAV - Remise en service","SAV - Remplacement équipement","SAV - Recâblage","Maintenance préventive","Nettoyage / Réorganisation","Remplacement cassette(s)","Remplacement coupleur","Soudure(s) fibre","Rebrassage","Mesure optique","Intervention multi-SAV","MSA","Autre"];
+const TYPES=["SAV - Remise en service","SAV - Remplacement équipement","SAV - Recâblage","Maintenance préventive","Nettoyage / Réorganisation","Remplacement cassette(s)","Remplacement coupleur","Soudure(s) fibre","Rebrassage","Mesure optique","Intervention multi-SAV","Cartographie / Remise en conformité","MSA","Autre"];
+const CARTO_TYPE="Cartographie / Remise en conformité";
 const PROBS=["Fibres cassées","Connecteurs sales/endommagés","Cassettes mal rangées","Câbles non étiquetés","Boîtier endommagé","Infiltration d'eau","Coupleur défaillant","Soudures défectueuses","Câble sectionné","PM saturé","Vandalisme","Aucun problème"];
 const REJECT_MSGS=["Photos manquantes","Mesures optiques incomplètes","Actions non détaillées","État box non renseigné","Checklist IW incomplète","Matériel non précisé","Observations insuffisantes"];
 
@@ -873,16 +874,24 @@ export default function App(){
           {filtered.map((pm,i)=>(<div key={pm.code} style={{display:"grid",gridTemplateColumns:isM?"2fr .5fr 2.5fr .6fr .7fr 1.4fr 1fr":"2.2fr .5fr 3fr .7fr .8fr 1fr",padding:"6px 10px",fontFamily:F,fontSize:11,background:i%2===0?"#fff":"#fafaf6",borderBottom:`1px solid ${CL.bd}`,alignItems:"center"}}>
             <div style={{fontWeight:700,fontSize:10,fontFamily:"monospace",color:CL.dk}}>{pm.code}{iwItems.some(iw=>iw.pm_code===pm.code&&iw.type==="MSA")&&<span style={{marginLeft:4,padding:"1px 5px",borderRadius:8,background:"#7c3aed",color:"#fff",fontFamily:F,fontSize:7,fontWeight:800,verticalAlign:"middle"}}>MSA</span>}</div>
             <div style={{color:CL.sb,fontSize:10}}>{pm.dept}</div>
-            <div style={{color:"#374151",fontSize:10}}>{pm.adresse}</div>
+            <div style={{color:"#374151",fontSize:10}}>
+              <div>{pm.adresse}</div>
+              {(()=>{const ts=assigns[pm.code]?.types||[];if(ts.length===0)return null;
+                const abbr=t=>{const m={"SAV - Remise en service":"SAV-Remise","SAV - Remplacement équipement":"SAV-Remplct","SAV - Recâblage":"SAV-Recâb.","Maintenance préventive":"Maint.","Nettoyage / Réorganisation":"Nettoyage","Remplacement cassette(s)":"Cassette","Remplacement coupleur":"Coupleur","Soudure(s) fibre":"Soudure","Mesure optique":"Mesure","Intervention multi-SAV":"Multi-SAV","Rebrassage":"Rebrass.","Cartographie / Remise en conformité":"🗺️ Carto"};return m[t]||t;};
+                return(<div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:2}}>{ts.map(t=><span key={t} style={{padding:"1px 5px",borderRadius:6,background:"#f3e8ff",color:"#7c3aed",fontFamily:F,fontSize:8,fontWeight:700,letterSpacing:.2}}>📋 {abbr(t)}</span>)}</div>);
+              })()}
+            </div>
             <div style={{textAlign:"center",fontWeight:800,color:pm.nbIW>=10?"#dc2626":CL.dk,fontSize:12}}>{pm.nbIW}</div>
             <div style={{textAlign:"center"}}><B color={pC(pm.nbIW)}>{pL(pm.nbIW)}</B></div>
             {isM&&<div style={{textAlign:"center"}}>{assigns[pm.code]?.tech?<><B color="purple">{assigns[pm.code].tech}</B><button onClick={()=>{setShowAss(pm.code);setAssTypes(assigns[pm.code]?.types||[]);}} style={{border:"none",background:"transparent",cursor:"pointer",fontSize:8,marginLeft:2}}>✏️</button></>:<button onClick={()=>{setShowAss(pm.code);setAssTypes([]);}} style={{...b2,padding:"2px 6px",fontSize:8,color:"#7c3aed",borderColor:"#c4b5fd"}}>Affecter</button>}</div>}
             <div style={{textAlign:"center",display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
               <button onClick={()=>startCR(pm)} style={{...b1,padding:"3px 7px",fontSize:9,position:"relative"}}>{hasDraft(pm.code)?"📝 Reprendre":"+CR"}</button>
-              <button onClick={()=>startCarto(pm)} style={{...b1,padding:"3px 7px",fontSize:9,background:"#7c3aed"}}>🗺️</button>
+              {(assigns[pm.code]?.types||[]).includes(CARTO_TYPE)&&<button onClick={()=>startCarto(pm)} style={{...b1,padding:"3px 7px",fontSize:9,background:"#7c3aed"}} title="Démarrer la cartographie">🗺️</button>}
               {isM&&<button onClick={()=>{setShowIWPanel(pm.code);setIwForm({ref_iw:"",position:"",commentaire:""});setIwEditId(null);}} style={{...b2,padding:"2px 5px",fontSize:8,color:iwForPM(pm.code).length>0?"#059669":"#7c3aed",borderColor:iwForPM(pm.code).length>0?"#86efac":"#c4b5fd"}}>{iwForPM(pm.code).length>0?`📋${iwForPM(pm.code).length}`:"📋+"}</button>}
-              {pm.lat?<button onClick={()=>openWaze(pm.lat,pm.lng)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#33ccff",borderColor:"#33ccff"}}>📍</button>
-              :<button onClick={()=>openMapsAddr(pm.adresse)} style={{...b2,padding:"2px 5px",fontSize:8}}>📍</button>}
+              {pm.lat?<>
+                <button onClick={()=>openWaze(pm.lat,pm.lng)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#33ccff",borderColor:"#33ccff"}} title="Ouvrir dans Waze">W</button>
+                <button onClick={()=>openMaps(pm.lat,pm.lng,pm.code)} style={{...b2,padding:"2px 5px",fontSize:8,color:"#1a73e8",borderColor:"#1a73e8"}} title="Ouvrir dans Google Maps">M</button>
+              </>:<button onClick={()=>openMapsAddr(pm.adresse)} style={{...b2,padding:"2px 5px",fontSize:8}} title="Ouvrir l'adresse dans Google Maps">📍</button>}
               {repsFor(pm.code).length>0&&<button onClick={()=>{setPg("hist");setHistSearch(pm.code);}} style={{...b2,padding:"2px 5px",fontSize:8}}>📋{repsFor(pm.code).length}</button>}
             </div>
           </div>))}
@@ -1155,8 +1164,16 @@ export default function App(){
     const totalIWDone=fl.reduce((s,r)=>(r.iw_results||r.iwResults||[]).filter(i=>i.status==="Fait").length+s,0);
 
     if(viewR)return VR({r:viewR});
+    const isPmFilter=histSearch&&pms.some(p=>p.code.toLowerCase()===histSearch.toLowerCase());
     return(<div style={{padding:16}}>
       <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:12}}>{isT?"Mes CR":"Tous les CR"}</h2>
+      {isPmFilter&&<div style={{...crd,padding:10,marginBottom:12,borderLeft:"4px solid #2563eb",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#eff6ff"}}>
+        <div>
+          <div style={{fontFamily:F,fontSize:11,color:"#1e40af",fontWeight:700,textTransform:"uppercase",letterSpacing:.4}}>📋 Historique par PM</div>
+          <div style={{fontFamily:"monospace",fontSize:14,fontWeight:800,color:CL.dk,marginTop:2}}>{histSearch.toUpperCase()}</div>
+        </div>
+        <button onClick={()=>setHistSearch("")} style={{...b2,padding:"4px 10px",fontSize:10}}>✕ Voir tous les CR</button>
+      </div>}
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"flex-end"}}>
         <input placeholder="🔍 PM, tech..." value={histSearch} onChange={e=>setHistSearch(e.target.value)} style={{...inp,maxWidth:200,fontSize:12}}/>
         <div><label style={{...lbl,marginBottom:2}}>Du</label><input type="date" value={histDateFrom} onChange={e=>setHistDateFrom(e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",width:140}}/></div>
@@ -1413,6 +1430,14 @@ export default function App(){
   const PENALITE_MOTIFS=["Non conforme STAS","Mauvaise position","Jarretière non conforme","Connecteur sale","Fibre mal lovée","Étiquetage manquant"];
 
   const startCarto=(pm)=>{
+    // Guard: tech can only start a carto on a PM where the manager has assigned the CARTO_TYPE
+    if(isT){
+      const assignedTypes=assigns[pm.code]?.types||[];
+      if(!assignedTypes.includes(CARTO_TYPE)){
+        alert("⛔ Vous ne pouvez pas démarrer une cartographie sur ce PM.\nVotre manager doit d'abord affecter le type \"Cartographie / Remise en conformité\".");
+        return;
+      }
+    }
     setCartoForm({
       pmCode:pm.code,pmAdresse:pm.adresse||"",pmDept:pm.dept||"",
       tech:isT?tName:"",date:new Date().toISOString().slice(0,10),
@@ -1592,7 +1617,31 @@ export default function App(){
     ${c.obs?`<div class="section"><div class="section-title">Observations</div><p style="white-space:pre-wrap">${c.obs}</p></div>`:""}
     <div style="margin-top:30px;text-align:center;font-size:9px;color:#999">VIE DE RÉSEAU — TechnoSmart · Généré le ${new Date().toLocaleDateString("fr-FR")}</div>
     <script>window.onload=()=>window.print();<\/script></body></html>`;
-    const w=window.open("","_blank");if(w){w.document.write(html);w.document.close();}
+    const w=window.open("","_blank");
+    if(w&&w.document){
+      w.document.write(html);
+      w.document.close();
+    }else{
+      // Popup blocked or mobile — fallback to Blob URL navigation in same tab via download
+      try{
+        const blob=new Blob([html],{type:"text/html"});
+        const url=URL.createObjectURL(blob);
+        const w2=window.open(url,"_blank");
+        if(!w2){
+          // Last resort: trigger a download
+          const a=document.createElement("a");
+          a.href=url;
+          a.download=`carto_${c.pm_code||"export"}.html`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          alert("⚠️ Pop-up bloquée. Le fichier a été téléchargé — ouvre-le et utilise Ctrl+P / Imprimer pour générer le PDF.");
+        }
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+      }catch(e){
+        alert("Impossible d'ouvrir l'export PDF : "+e.message);
+      }
+    }
   };
 
   const ViewCartoPage=()=>{
@@ -1673,9 +1722,13 @@ export default function App(){
     const myPmsForCarto=isT?activePms.filter(pm=>assigns[pm.code]?.tech===tName):activePms;
     return(<div style={{padding:16,maxWidth:900}}>
       <h2 style={{fontFamily:F,color:CL.dk,fontSize:18,fontWeight:800,marginBottom:14}}>🗺️ Remise en conformité PM</h2>
-      <div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
-        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:8}}>+ Nouvelle intervention remise en conformité</h3>
-        <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Sélectionnez un PM existant ou saisissez un code PM manuellement</div>
+      {isT&&<div style={{...crd,borderLeft:"4px solid #2563eb",background:"#eff6ff",padding:12}}>
+        <div style={{fontFamily:F,fontSize:11,color:"#1e40af",fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:.4}}>ℹ️ Information</div>
+        <div style={{fontFamily:F,fontSize:12,color:CL.dk}}>Pour démarrer une cartographie, votre manager doit affecter le type <span style={{padding:"1px 6px",borderRadius:6,background:"#f3e8ff",color:"#7c3aed",fontWeight:700,fontSize:11}}>🗺️ Carto</span> sur un PM. Vous verrez alors un bouton 🗺️ apparaître sur la ligne du PM dans le tableau de bord.</div>
+      </div>}
+      {isM&&<div style={{...crd,borderLeft:"4px solid #7c3aed"}}>
+        <h3 style={{fontFamily:F,fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:8}}>+ Nouvelle intervention (manager)</h3>
+        <div style={{fontFamily:F,fontSize:11,color:CL.sb,marginBottom:8}}>Réservé aux cas particuliers (PM hors-import). Pour un PM importé, affectez plutôt le type <em>Cartographie</em> au technicien depuis le tableau de bord.</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
           <div style={{flex:1,minWidth:200}}>
             <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginBottom:2}}>PM importé</div>
@@ -1696,7 +1749,6 @@ export default function App(){
               const pm=pms.find(p=>p.code===sel);
               if(pm)startCarto(pm);
             }else if(manual){
-              // Create a virtual PM for manual entry
               const existingPm=pms.find(p=>p.code===manual);
               startCarto(existingPm||{code:manual,adresse:"",dept:""});
             }else{
@@ -1704,7 +1756,7 @@ export default function App(){
             }
           }} style={{...b1,padding:"8px 16px",background:"#7c3aed"}}>🗺️ Démarrer</button>
         </div>
-      </div>
+      </div>}
       <div style={{display:"flex",gap:8,marginTop:16,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
         <input value={cartoSearch} onChange={e=>setCartoSearch(e.target.value)} placeholder="🔍 PM, tech..." style={{...inp,maxWidth:240}}/>
         <div style={{fontFamily:F,fontSize:12,color:CL.sb,display:"flex",alignItems:"center"}}>{filteredCartos.length} intervention(s)</div>
