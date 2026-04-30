@@ -67,6 +67,12 @@ export default function App(){
   const [cartos,setCartos]=useState([]); // cartographies
   const [cartoForm,setCartoForm]=useState(null); // current cartographie form
   const [viewCarto,setViewCarto]=useState(null); // viewing a cartographie
+  const [cartoSearch,setCartoSearch]=useState(""); // search in carto list
+  const [loadError,setLoadError]=useState(false);
+  const [msaMsg,setMsaMsg]=useState("");
+  const [geoProgress,setGeoProgress]=useState("");
+  const [showRoute,setShowRoute]=useState(false);
+  const [routeData,setRouteData]=useState([]);
   const fileRef=useRef(null);
   const impRef=useRef(null);
   const msaRef=useRef(null);
@@ -133,7 +139,6 @@ export default function App(){
   };
 
   // ========== SUPABASE DATA LOADING ==========
-  const [loadError,setLoadError]=useState(false);
   const loadAll = useCallback(async()=>{
     try{
       const [{data:pmData},{data:techData},{data:repData},{data:assData},{data:cfgData},{data:iwData},{data:notifData},{data:msgData}] = await Promise.all([
@@ -326,7 +331,6 @@ export default function App(){
   const cancelEditIW=()=>{setIwEditId(null);setIwForm({ref_iw:"",cote_oc:"",cote_oi:"",commentaire:""});};
 
   // ========== MSA IMPORT ==========
-  const [msaMsg,setMsaMsg]=useState("");
   const handleImportMSA=e=>{
     const file=e.target.files[0];if(!file)return;
     const rd=new FileReader();rd.onload=async ev=>{
@@ -448,7 +452,6 @@ export default function App(){
   };
 
   // ========== IMPORT ==========
-  const [geoProgress,setGeoProgress]=useState("");
   const handleImport=e=>{
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
@@ -538,9 +541,6 @@ export default function App(){
     }
     return visited;
   };
-
-  const [showRoute,setShowRoute]=useState(false);
-  const [routeData,setRouteData]=useState([]);
 
   const calcRoute=(techName)=>{
     const techPms=activePms.filter(p=>assigns[p.code]?.tech===techName&&p.lat&&p.lng);
@@ -1544,7 +1544,6 @@ export default function App(){
   };
 
   // ========== CARTOGRAPHIE LIST PAGE ==========
-  const [cartoSearch,setCartoSearch]=useState("");
   const CartoListPg=()=>{
     const myCartos=isT?cartos.filter(c=>c.tech===tName):cartos;
     const filteredCartos=myCartos.filter(c=>!cartoSearch||(c.pm_code||"").toLowerCase().includes(cartoSearch.toLowerCase())||(c.tech||"").toLowerCase().includes(cartoSearch.toLowerCase()));
