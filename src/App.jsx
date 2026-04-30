@@ -291,6 +291,11 @@ export default function App(){
       // If PM was resolved (cr_done), reactivate it
       const pm=pms.find(p=>p.code===pmCode);
       if(pm?.resolved){await supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).eq("code",pmCode);}
+      // Auto-redirect to carto form if CARTO_TYPE is part of assigned types
+      if(t.includes(CARTO_TYPE)){
+        maybeStartCartoAfterAssign(pmCode,t,techName);
+        return;
+      }
     }
     setShowAss(null);
   };
@@ -298,6 +303,30 @@ export default function App(){
   const saveAssTypes=async(pmCode,types)=>{
     await supabase.from("assignments").update({types}).eq("pm_code",pmCode);
     setAssigns(prev=>({...prev,[pmCode]:{...prev[pmCode],types}}));
+  };
+
+  // When the manager has just enabled CARTO_TYPE on a PM that has a tech assigned,
+  // auto-redirect to the carto creation form (only if no carto exists yet for this PM).
+  const maybeStartCartoAfterAssign=(pmCode,types,techName)=>{
+    if(!isM)return;
+    if(!techName)return;
+    if(!types.includes(CARTO_TYPE))return;
+    const existingCarto=cartos.some(c=>c.pm_code===pmCode);
+    if(existingCarto)return;
+    const pm=pms.find(p=>p.code===pmCode);
+    if(!pm)return;
+    setShowAss(null);
+    // Pre-fill the tech in the carto form so the manager only has to set times + grid
+    setTimeout(()=>{
+      setCartoForm({
+        pmCode:pm.code,pmAdresse:pm.adresse||"",pmDept:pm.dept||"",
+        tech:techName,date:new Date().toISOString().slice(0,10),
+        h1:"",h2:"",
+        coupleurs:[{num:1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false,prestataire:false}))}],
+        photos:[],obs:""
+      });
+      setPg("cartoForm");
+    },150);
   };
 
   const saveMgrCode=async(code)=>{
@@ -907,7 +936,22 @@ export default function App(){
         </div>
         <div style={{marginBottom:14}}>
           <div style={lbl}>Type d'intervention *</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=><button key={t} onClick={()=>{const nt=assTypes.includes(t)?assTypes.filter(x=>x!==t):[...assTypes,t];setAssTypes(nt);if(assigns[showAss]?.tech)saveAssTypes(showAss,nt);}} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${assTypes.includes(t)?CL.a:CL.bd}`,background:assTypes.includes(t)?"#fef2f2":"#fff",color:assTypes.includes(t)?CL.a:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{assTypes.includes(t)?"✓ ":""}{t}</button>)}</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{TYPES.map(t=>{
+            const isCarto=t===CARTO_TYPE;
+            const checked=assTypes.includes(t);
+            const baseColor=isCarto?"#7c3aed":CL.a;
+            const baseBg=isCarto?"#f3e8ff":"#fef2f2";
+            return(<button key={t} onClick={()=>{
+              const wasChecked=assTypes.includes(t);
+              const nt=wasChecked?assTypes.filter(x=>x!==t):[...assTypes,t];
+              setAssTypes(nt);
+              const currentTech=assigns[showAss]?.tech;
+              if(currentTech)saveAssTypes(showAss,nt);
+              if(!wasChecked&&t===CARTO_TYPE&&currentTech){
+                maybeStartCartoAfterAssign(showAss,nt,currentTech);
+              }
+            }} style={{padding:"4px 8px",borderRadius:14,border:`1.5px solid ${checked?baseColor:CL.bd}`,background:checked?baseBg:"#fff",color:checked?baseColor:CL.sb,fontFamily:F,fontSize:10,fontWeight:600,cursor:"pointer"}}>{checked?"✓ ":""}{isCarto?"🗺️ ":""}{t}</button>);
+          })}</div>
         </div>
         {assigns[showAss]?.tech&&<button onClick={()=>assignTech(showAss,null)} style={{...b2,width:"100%",marginTop:4,fontSize:11,color:"#dc2626"}}>Retirer l'affectation</button>}
         <button onClick={()=>setShowAss(null)} style={{...b2,width:"100%",marginTop:6}}>Fermer</button>
