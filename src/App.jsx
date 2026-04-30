@@ -1529,13 +1529,13 @@ export default function App(){
 
       <div style={{marginTop:12}}><label style={lbl}>Observations</label><textarea value={cf.obs} onChange={e=>setCartoForm(f=>({...f,obs:e.target.value}))} rows={2} style={{...inp,resize:"vertical"}}/></div>
 
-      {(cf.h1||cf.editId)&&!cf.h2&&!cf.editId&&<div style={{textAlign:"center",marginBottom:16}}>
+      {cf.h1&&!cf.h2&&isT&&<div style={{textAlign:"center",marginBottom:16}}>
         <button onClick={()=>setCartoForm(f=>({...f,h2:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#dc2626",boxShadow:"0 4px 16px rgba(220,38,38,.3)"}}>⏹ Fin d'intervention</button>
         <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:8}}>Cliquez pour enregistrer l'heure de départ</div>
       </div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30}}>
         <button onClick={()=>{setCartoForm(null);setPg("cartoList");}} style={b2}>Annuler</button>
-        <button onClick={submitCarto} disabled={submitting||(isT&&(!cf.h1||!cf.h2))||(isM&&!cf.tech)} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:(submitting||(isT&&(!cf.h1||!cf.h2))||(isM&&!cf.tech))?.4:1}}>{submitting?"⏳ Envoi...":(cf.editId?"💾 Enregistrer les modifications":(isM?"📋 Créer l'intervention":"🗺️ Enregistrer"))}</button>
+        <button onClick={submitCarto} disabled={submitting||(isT&&(!cf.h1||!cf.h2))||(isM&&!cf.tech)} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:(submitting||(isT&&(!cf.h1||!cf.h2))||(isM&&!cf.tech))?.4:1}}>{submitting?"⏳ Envoi...":(isT?"🗺️ Envoyer le CR":(cf.editId?"💾 Enregistrer les modifications":"📋 Créer l'intervention"))}</button>
       </div>
 
     </div>);
