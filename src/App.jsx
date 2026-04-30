@@ -1413,8 +1413,8 @@ export default function App(){
       pmCode:pm.code,pmAdresse:pm.adresse||"",pmDept:pm.dept||"",
       tech:isT?tName:"",date:new Date().toISOString().slice(0,10),
       h1:"",h2:"",
-      coupleurs:[{num:1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false}))}],
-      photos:[],obs:"",prestatairePositions:""
+      coupleurs:[{num:1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false,prestataire:false}))}],
+      photos:[],obs:""
     });
     setPg("cartoForm");
   };
@@ -1423,7 +1423,7 @@ export default function App(){
     setCartoForm({
       pmCode:c.pm_code,pmAdresse:"",pmDept:"",tech:c.tech,date:c.date,
       h1:c.h1||"",h2:c.h2||"",coupleurs:c.coupleurs||[],photos:c.photos||[],obs:c.obs||"",
-      editId:c.id,prestatairePositions:c.prestataire_positions||""
+      editId:c.id,
     });
     setPg("cartoForm");
   };
@@ -1433,7 +1433,7 @@ export default function App(){
     try{
       let photos=cartoForm.photos||[];
       if(photos.length>0){photos=await Promise.all(photos.map(async p=>({...p,data:await compressForStorage(p.data)})));}
-      const baseData={coupleurs:cartoForm.coupleurs,photos,obs:cartoForm.obs,tech:cartoForm.tech,date:cartoForm.date,h1:cartoForm.h1||"",h2:cartoForm.h2||"",prestataire_positions:cartoForm.prestatairePositions||""};
+      const baseData={coupleurs:cartoForm.coupleurs,photos,obs:cartoForm.obs,tech:cartoForm.tech,date:cartoForm.date,h1:cartoForm.h1||"",h2:cartoForm.h2||""};
       if(cartoForm.editId){
         const updates=baseData;
         const{error}=await supabase.from("cartographies").update(updates).eq("id",cartoForm.editId);
@@ -1466,34 +1466,32 @@ export default function App(){
           <div><div style={lbl}>Départ</div><div style={{...inp,background:cf.h2?"#fef2f2":"#f4f3ef",fontWeight:700,color:cf.h2?"#dc2626":CL.sb}}>{cf.h2||"—"}</div></div>
         </div>
         {isM&&<div style={{marginTop:10}}><div style={lbl}>Technicien affecté *</div><select value={cf.tech} onChange={e=>setCartoForm(f=>({...f,tech:e.target.value}))} style={inp}><option value="">Sélectionner...</option>{techs.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}</select></div>}
-        {isM&&<div style={{marginTop:10}}><div style={lbl}>⚠️ Positions prestataire (soumises à pénalités)</div><div style={{fontFamily:F,fontSize:9,color:CL.sb,marginBottom:6}}>Cochez les positions brassées par les prestataires — le tech les verra en priorité</div><div style={{display:"grid",gridTemplateColumns:"repeat(16,1fr)",gap:2}}>{Array.from({length:32},(_,i)=>{const n=i+1;const checked=(cf.prestatairePositions||"").split(",").map(s=>parseInt(s.trim())).includes(n);return<div key={n} onClick={()=>{const current=(cf.prestatairePositions||"").split(",").map(s=>parseInt(s.trim())).filter(x=>!isNaN(x));const next=checked?current.filter(x=>x!==n):[...current,n].sort((a,b)=>a-b);setCartoForm(f=>({...f,prestatairePositions:next.join(",")}));}} style={{padding:"4px 2px",borderRadius:6,border:`2px solid ${checked?"#f59e0b":"#e5e7eb"}`,background:checked?"#fef3c7":"#fff",textAlign:"center",cursor:"pointer",fontFamily:F,fontSize:10,fontWeight:checked?800:400,color:checked?"#f59e0b":"#999"}}>{n}</div>})}</div></div>}
-        {isT&&cf.prestatairePositions&&<div style={{marginTop:10,padding:8,borderRadius:8,background:"#fef3c7",border:"1.5px solid #f59e0b"}}><div style={{fontFamily:F,fontSize:11,fontWeight:700,color:"#92400e"}}>⚠️ Positions prestataire à vérifier en priorité : <span style={{fontFamily:"monospace",fontSize:13}}>{cf.prestatairePositions}</span></div></div>}
+        {isT&&cf.coupleurs.some(c=>c.positions.some(p=>p.prestataire))&&<div style={{marginTop:10,padding:8,borderRadius:8,background:"#fef3c7",border:"1.5px solid #f59e0b"}}><div style={{fontFamily:F,fontSize:11,fontWeight:700,color:"#92400e"}}>⚠️ Certaines positions sont brassées par des prestataires — elles sont marquées en orange sur la grille</div></div>}
       </div>
-      {!cf.editId&&!cf.h1&&<div style={{textAlign:"center",padding:20}}>
-        {!cf.tech&&<div style={{fontFamily:F,fontSize:12,color:"#dc2626",fontWeight:700,marginBottom:12}}>⚠️ Sélectionnez un technicien avant de démarrer</div>}
-        <button onClick={()=>{if(!cf.tech){alert("Veuillez affecter un technicien");return;}setCartoForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}));}} disabled={!cf.tech} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#059669",boxShadow:"0 4px 16px rgba(5,150,105,.3)",opacity:cf.tech?1:.4,cursor:cf.tech?"pointer":"not-allowed"}}>▶ Démarrer l'intervention</button>
+      {!cf.h1&&isT&&<div style={{textAlign:"center",padding:20}}>
+        <button onClick={()=>setCartoForm(f=>({...f,h1:new Date().toTimeString().slice(0,5)}))} style={{...b1,padding:"16px 40px",fontSize:16,borderRadius:12,background:"#059669",boxShadow:"0 4px 16px rgba(5,150,105,.3)"}}>▶ Démarrer l'intervention</button>
         <div style={{fontFamily:F,fontSize:10,color:CL.sb,marginTop:8}}>Cliquez pour enregistrer l'heure d'arrivée</div>
       </div>}
 
-      {(cf.h1||cf.editId)&&cf.coupleurs.map((cpl,ci)=>{
-      const prestPos=(cf.prestatairePositions||"").split(",").map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
+      {(cf.h1||cf.editId||isM)&&cf.coupleurs.map((cpl,ci)=>{
       return(
         <div key={ci} style={{...crd,marginTop:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <h3 style={{fontFamily:F,fontSize:14,fontWeight:800,color:"#7c3aed"}}>Coupleur {cpl.num}</h3>
             <div style={{fontFamily:F,fontSize:10,color:CL.sb}}>
-              <span style={{color:"#059669",fontWeight:700}}>{cpl.positions.filter(p=>p.etat==="Occupé").length} occupés</span> · {cpl.positions.filter(p=>p.etat==="Libre").length} libres · <span style={{color:"#dc2626",fontWeight:700}}>{cpl.positions.filter(p=>p.etat==="HS").length} HS</span> · <span style={{color:"#f59e0b",fontWeight:700}}>⚠️ {cpl.positions.filter(p=>p.penalite).length} pénalités</span>{cpl.positions.filter(p=>p.corrige).length>0&&<span style={{color:"#059669",fontWeight:700}}> · ✅ {cpl.positions.filter(p=>p.corrige).length} corrigés</span>}
+              <span style={{color:"#059669",fontWeight:700}}>{cpl.positions.filter(p=>p.etat==="Occupé").length} occupés</span> · {cpl.positions.filter(p=>p.etat==="Libre").length} libres · <span style={{color:"#dc2626",fontWeight:700}}>{cpl.positions.filter(p=>p.etat==="HS").length} HS</span> · <span style={{color:"#f59e0b",fontWeight:700}}>⚠️ {cpl.positions.filter(p=>p.penalite).length} pénalités</span>{cpl.positions.filter(p=>p.corrige).length>0&&<span style={{color:"#059669",fontWeight:700}}> · ✅ {cpl.positions.filter(p=>p.corrige).length} corrigés</span>}{cpl.positions.filter(p=>p.prestataire).length>0&&<span style={{color:"#f59e0b",fontWeight:700}}> · 🔶 {cpl.positions.filter(p=>p.prestataire).length} presta.</span>}
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:4}}>
             {cpl.positions.map((pos,pi)=>(
-              <div key={pi} style={{border:`2px solid ${pos.penalite?"#f59e0b":prestPos.includes(pos.pos)?"#f59e0b":pos.etat?etatColor[pos.etat]||CL.bd:CL.bd}`,borderRadius:8,padding:6,background:pos.penalite?"#fef3c7":pos.etat==="Occupé"?"#f0fdf4":pos.etat==="HS"?"#fef2f2":"#fff",textAlign:"center",position:"relative"}}>
-                {prestPos.includes(pos.pos)&&!pos.penalite&&<div style={{position:"absolute",top:-6,left:-6,width:16,height:16,borderRadius:"50%",background:"#f59e0b",color:"#fff",fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}>!</div>}
-                <div style={{fontFamily:F,fontSize:12,fontWeight:800,color:prestPos.includes(pos.pos)?"#f59e0b":CL.dk,marginBottom:4}}>{pos.pos}</div>
+              <div key={pi} style={{border:`2px solid ${pos.penalite?"#f59e0b":pos.prestataire?"#f59e0b":pos.etat?etatColor[pos.etat]||CL.bd:CL.bd}`,borderRadius:8,padding:6,background:pos.penalite?"#fef3c7":pos.prestataire&&!pos.etat?"#fffbeb":pos.etat==="Occupé"?"#f0fdf4":pos.etat==="HS"?"#fef2f2":"#fff",textAlign:"center",position:"relative"}}>
+                {pos.prestataire&&!pos.penalite&&<div style={{position:"absolute",top:-6,left:-6,width:16,height:16,borderRadius:"50%",background:"#f59e0b",color:"#fff",fontSize:8,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}>!</div>}
+                <div style={{fontFamily:F,fontSize:12,fontWeight:800,color:pos.prestataire?"#f59e0b":CL.dk,marginBottom:4}}>{pos.pos}</div>
                 <input value={pos.oc} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].oc=e.target.value;setCartoForm(f=>({...f,coupleurs:nc}));}} placeholder="OC" style={{...inp,fontSize:9,padding:"2px 3px",textAlign:"center",marginBottom:3,width:"100%"}}/>
                 <select value={pos.etat} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].etat=e.target.value;setCartoForm(f=>({...f,coupleurs:nc}));}} style={{...inp,fontSize:8,padding:"2px 2px",width:"100%",color:pos.etat?etatColor[pos.etat]:CL.sb,fontWeight:700}}>
                   {ETAT_POS.map(e=><option key={e} value={e}>{e||"—"}</option>)}
                 </select>
+                {isM&&<div style={{marginTop:2}}><label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:2,cursor:"pointer"}}><input type="checkbox" checked={!!pos.prestataire} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].prestataire=e.target.checked;setCartoForm(f=>({...f,coupleurs:nc}));}} style={{width:9,height:9,accentColor:"#f59e0b"}}/><span style={{fontFamily:F,fontSize:6,color:"#f59e0b",fontWeight:700}}>Presta.</span></label></div>}
                 <div style={{marginTop:3}}>
                   <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:2,cursor:"pointer"}}>
                     <input type="checkbox" checked={!!pos.penalite} onChange={e=>{const nc=[...cf.coupleurs];nc[ci].positions[pi].penalite=e.target.checked;if(!e.target.checked){nc[ci].positions[pi].penMotif="";nc[ci].positions[pi].corrige=false;}setCartoForm(f=>({...f,coupleurs:nc}));}} style={{width:10,height:10,accentColor:"#f59e0b"}}/>
@@ -1515,7 +1513,7 @@ export default function App(){
         </div>
       );})}
 
-      <button onClick={()=>setCartoForm(f=>({...f,coupleurs:[...f.coupleurs,{num:f.coupleurs.length+1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false}))}]}))} style={{...b2,width:"100%",marginTop:12,padding:12,fontSize:12,color:"#7c3aed",borderColor:"#c4b5fd"}}>+ Ajouter un coupleur</button>
+      <button onClick={()=>setCartoForm(f=>({...f,coupleurs:[...f.coupleurs,{num:f.coupleurs.length+1,positions:Array.from({length:32},(_,i)=>({pos:i+1,oc:"",etat:"",penalite:false,penMotif:"",corrige:false,prestataire:false}))}]}))} style={{...b2,width:"100%",marginTop:12,padding:12,fontSize:12,color:"#7c3aed",borderColor:"#c4b5fd"}}>+ Ajouter un coupleur</button>
 
       <div style={{...crd,marginTop:12}}><h3 style={sT}>📸 Photos (preuves pénalités)</h3>
         <div style={{border:`2px dashed #7c3aed`,borderRadius:12,padding:16,textAlign:"center",cursor:"pointer",position:"relative"}} onClick={()=>document.getElementById("cartoPhotoInput")?.click()}>
@@ -1533,7 +1531,7 @@ export default function App(){
       </div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16,marginBottom:30}}>
         <button onClick={()=>{setCartoForm(null);setPg("cartoList");}} style={b2}>Annuler</button>
-        <button onClick={submitCarto} disabled={submitting||(!cf.editId&&(!cf.h1||!cf.h2))} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:(submitting||(!cf.editId&&(!cf.h1||!cf.h2)))?.4:1}}>{submitting?"⏳ Envoi...":(cf.editId?"💾 Enregistrer les modifications":"🗺️ Enregistrer la cartographie")}</button>
+        <button onClick={submitCarto} disabled={submitting||(isT&&(!cf.h1||!cf.h2))||(isM&&!cf.tech)} style={{...b1,padding:"10px 24px",fontSize:14,background:"#7c3aed",opacity:(submitting||(isT&&(!cf.h1||!cf.h2))||(isM&&!cf.tech))?.4:1}}>{submitting?"⏳ Envoi...":(cf.editId?"💾 Enregistrer les modifications":(isM?"📋 Créer l'intervention":"🗺️ Enregistrer"))}</button>
       </div>
 
     </div>);
