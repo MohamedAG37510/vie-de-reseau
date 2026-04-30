@@ -1555,6 +1555,46 @@ export default function App(){
     }
   };
 
+  const exportCartoPDF=(c)=>{
+    const coupleurs=c.coupleurs||[];
+    const allPen=[];coupleurs.forEach((cpl)=>(cpl.positions||[]).forEach(pos=>{if(pos.penalite)allPen.push({coupleur:cpl.num,pos:pos.pos,oc:pos.oc,motif:pos.penMotif,corrige:pos.corrige});}));
+    const eC={Occupé:"#059669",Libre:"#6b7280",HS:"#dc2626"};
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Carto ${c.pm_code}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'DM Sans',Arial,sans-serif;padding:20px;font-size:11px}
+    .header{display:flex;justify-content:space-between;border-bottom:3px solid #7c3aed;padding-bottom:10px;margin-bottom:16px}
+    .pm{font-family:monospace;font-size:18px;font-weight:800;color:#7c3aed}
+    .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:10px 0}
+    .pos{border:2px solid #e5e7eb;border-radius:6px;padding:6px 3px;text-align:center;font-size:10px}
+    .pos .num{font-size:13px;font-weight:800;margin-bottom:2px}
+    .pos .oc{font-family:monospace;font-size:8px;color:#7c3aed;font-weight:700}
+    .pos .etat{font-size:7px;font-weight:700;margin-top:2px}
+    .pos.occ{border-color:#059669;background:#f0fdf4}.pos.lib{border-color:#9ca3af;background:#f9fafb}
+    .pos.hs{border-color:#dc2626;background:#fef2f2}.pos.pen{border-color:#f59e0b;background:#fef3c7}
+    .pos.presta{box-shadow:inset 0 0 0 2px #f59e0b}
+    .pen-table{width:100%;border-collapse:collapse;margin:10px 0;font-size:10px}
+    .pen-table th{background:#f9fafb;padding:4px 8px;text-align:left;border-bottom:2px solid #333;font-size:9px;text-transform:uppercase}
+    .pen-table td{padding:4px 8px;border-bottom:1px solid #e5e7eb}
+    .section{margin-top:16px;page-break-inside:avoid}
+    .section-title{font-size:13px;font-weight:800;color:#7c3aed;border-bottom:2px solid #7c3aed;padding-bottom:4px;margin-bottom:8px}
+    .stats{display:flex;gap:16px;margin:8px 0;font-size:10px;font-weight:700}
+    @media print{body{padding:10px}button{display:none!important}}
+    </style></head><body>
+    <div class="header"><div><div style="font-size:14px;font-weight:800;color:#333">🗺️ Remise en conformité PM</div><div class="pm">${c.pm_code}</div></div>
+    <div style="text-align:right;font-size:11px;color:#666"><div>👷 ${c.tech}</div><div>${c.date||""}</div>${c.h1?`<div>▶ ${c.h1}${c.h2?" — ⏹ "+c.h2:""}</div>`:""}</div></div>
+    ${coupleurs.map(cpl=>{const occ=(cpl.positions||[]).filter(p=>p.etat==="Occupé").length;const lib=(cpl.positions||[]).filter(p=>p.etat==="Libre").length;const hs=(cpl.positions||[]).filter(p=>p.etat==="HS").length;const pen=(cpl.positions||[]).filter(p=>p.penalite).length;const cor=(cpl.positions||[]).filter(p=>p.corrige).length;const prest=(cpl.positions||[]).filter(p=>p.prestataire).length;
+    return`<div class="section"><div class="section-title">Coupleur ${cpl.num}</div>
+    <div class="stats"><span style="color:#059669">Occupés: ${occ}</span><span>Libres: ${lib}</span><span style="color:#dc2626">HS: ${hs}</span>${pen?`<span style="color:#f59e0b">⚠️ Pénalités: ${pen}</span>`:""}${cor?`<span style="color:#059669">✅ Corrigés: ${cor}</span>`:""}${prest?`<span style="color:#f59e0b">🔶 Presta: ${prest}</span>`:""}</div>
+    <div class="grid">${(cpl.positions||[]).map(pos=>{const cls=pos.penalite?"pen":pos.etat==="Occupé"?"occ":pos.etat==="Libre"?"lib":pos.etat==="HS"?"hs":"";return`<div class="pos ${cls} ${pos.prestataire?"presta":""}"><div class="num">${pos.pos}</div>${pos.oc?`<div class="oc">${pos.oc}</div>`:""}${pos.etat?`<div class="etat" style="color:${eC[pos.etat]||"#999"}">${pos.etat}</div>`:""}${pos.penalite?`<div style="font-size:6px;color:#f59e0b;font-weight:700;margin-top:1px">⚠️ ${pos.penMotif||"Pénalité"}</div>`:""}${pos.corrige?`<div style="font-size:6px;color:#059669;font-weight:700">✅ Corrigé</div>`:""}</div>`;}).join("")}</div></div>`;}).join("")}
+    ${allPen.length>0?`<div class="section"><div class="section-title">⚠️ Récapitulatif pénalités (${allPen.length})</div>
+    <table class="pen-table"><tr><th>Coupl.</th><th>Pos.</th><th>OC</th><th>Motif</th><th>État</th></tr>
+    ${allPen.map(p=>`<tr><td>C${p.coupleur}</td><td>${p.pos}</td><td style="font-family:monospace;color:#7c3aed">${p.oc||"—"}</td><td>${p.motif||"—"}</td><td style="color:${p.corrige?"#059669":"#dc2626"};font-weight:700">${p.corrige?"✅ Corrigé":"❌ Non corrigé"}</td></tr>`).join("")}
+    </table></div>`:""} 
+    ${c.obs?`<div class="section"><div class="section-title">Observations</div><p style="white-space:pre-wrap">${c.obs}</p></div>`:""}
+    <div style="margin-top:30px;text-align:center;font-size:9px;color:#999">VIE DE RÉSEAU — TechnoSmart · Généré le ${new Date().toLocaleDateString("fr-FR")}</div>
+    <script>window.onload=()=>window.print();<\/script></body></html>`;
+    const w=window.open("","_blank");if(w){w.document.write(html);w.document.close();}
+  };
+
   const ViewCartoPage=()=>{
     const c=viewCarto;if(!c)return null;
     const coupleurs=c.coupleurs||[];
@@ -1562,6 +1602,7 @@ export default function App(){
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
         <button onClick={()=>{setViewCarto(null);setPg("cartoList");}} style={{...b2,fontSize:11}}>← Retour</button>
         <button onClick={()=>{setViewCarto(null);startCartoFromExisting(c);}} style={{...b1,fontSize:11,padding:"6px 14px",background:"#7c3aed"}}>✏️ Modifier</button>
+        <button onClick={()=>exportCartoPDF(c)} style={{...b1,fontSize:11,padding:"6px 14px",background:"#1e40af"}}>📄 Export PDF</button>
         <button onClick={async()=>{
           if(!window.confirm("Supprimer cette cartographie ?"))return;
           await supabase.from("cartographies").delete().eq("id",c.id);
@@ -1664,22 +1705,26 @@ export default function App(){
           }} style={{...b1,padding:"8px 16px",background:"#7c3aed"}}>🗺️ Démarrer</button>
         </div>
       </div>
-      <div style={{display:"flex",gap:8,marginTop:16,marginBottom:12}}>
+      <div style={{display:"flex",gap:8,marginTop:16,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
         <input value={cartoSearch} onChange={e=>setCartoSearch(e.target.value)} placeholder="🔍 PM, tech..." style={{...inp,maxWidth:240}}/>
-        <div style={{fontFamily:F,fontSize:12,color:CL.sb,display:"flex",alignItems:"center"}}>{filteredCartos.length} cartographie(s)</div>
+        <div style={{fontFamily:F,fontSize:12,color:CL.sb,display:"flex",alignItems:"center"}}>{filteredCartos.length} intervention(s)</div>
       </div>
-      {filteredCartos.length===0?<div style={{textAlign:"center",padding:40,color:CL.sb,fontFamily:F}}>📭 Aucune cartographie.</div>:
-        filteredCartos.map(c=>{const done=!!c.h1&&!!c.h2;const started=!!c.h1&&!c.h2;return(<div key={c.id} style={{...crd,borderLeft:`4px solid ${done?"#059669":started?"#f59e0b":"#7c3aed"}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>viewCartoReport(c)}>
+      {/* PM History — group cartos by PM */}
+      {(()=>{const pmGroups={};filteredCartos.forEach(c=>{if(!pmGroups[c.pm_code])pmGroups[c.pm_code]=[];pmGroups[c.pm_code].push(c);});const pmCodes=Object.keys(pmGroups).sort();
+      return pmCodes.length===0?<div style={{textAlign:"center",padding:40,color:CL.sb,fontFamily:F}}>📭 Aucune intervention.</div>:
+        pmCodes.map(code=><div key={code} style={{marginBottom:16}}>
+          <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:"#7c3aed",marginBottom:6,display:"flex",alignItems:"center",gap:8}}>{code}<span style={{fontFamily:F,fontSize:9,fontWeight:600,color:CL.sb}}>{pmGroups[code].length} intervention(s)</span></div>
+          {pmGroups[code].map(c=>{const done=!!c.h1&&!!c.h2;const started=!!c.h1&&!c.h2;return(<div key={c.id} style={{...crd,borderLeft:`4px solid ${done?"#059669":started?"#f59e0b":"#7c3aed"}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}} onClick={()=>viewCartoReport(c)}>
           <div>
-            <span style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:CL.dk}}>{c.pm_code}</span>
-            <span style={{fontFamily:F,fontSize:10,color:CL.sb,marginLeft:8}}>👷 {c.tech}</span>
+            <span style={{fontFamily:F,fontSize:11,fontWeight:700,color:CL.dk}}>👷 {c.tech}</span>
             {done&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#dcfce7",color:"#059669",fontFamily:F,fontSize:8,fontWeight:700}}>✅ Terminée</span>}
             {started&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#fef3c7",color:"#f59e0b",fontFamily:F,fontSize:8,fontWeight:700}}>🔶 En cours</span>}
             {!started&&!done&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:8,background:"#f3e8ff",color:"#7c3aed",fontFamily:F,fontSize:8,fontWeight:700}}>📋 À faire</span>}
+            {c.h1&&<span style={{fontFamily:F,fontSize:9,color:CL.sb,marginLeft:6}}>▶{c.h1}{c.h2&&" ⏹"+c.h2}</span>}
           </div>
           <span style={{fontFamily:F,fontSize:10,color:CL.sb}}>{c.date?new Date(c.date).toLocaleDateString("fr-FR"):""}</span>
-        </div>);})
-      }
+        </div>);})}</div>);
+      })()}
     </div>);
   };
 
