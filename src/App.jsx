@@ -211,7 +211,10 @@ export default function App(){
 
   // ========== SUPABASE MUTATIONS ==========
   const savePms=async(newPms)=>{
-    const rows=newPms.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW}));
+    const rowsRaw=newPms.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW}));
+    const dedupMap=new Map();
+    rowsRaw.forEach(r=>dedupMap.set(r.code,r));
+    const rows=Array.from(dedupMap.values());
     await supabase.from("pms").upsert(rows,{onConflict:"code"});
     setPms(newPms);
   };
@@ -510,12 +513,26 @@ export default function App(){
         if(i%5===4)await new Promise(r=>setTimeout(r,150));
       }
 
-      const rows=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng,resolved:false,resolved_at:null}));
+      const rowsRaw=geoResults.map(p=>({code:p.code,dept:p.dept,adresse:p.adresse,nb_iw:p.nbIW,lat:p.lat,lng:p.lng,resolved:false,resolved_at:null}));
+      // Deduplicate by code (last occurrence wins) — Postgres rejects upsert with multiple rows sharing the conflict key
+      const dedupMap=new Map();
+      rowsRaw.forEach(r=>dedupMap.set(r.code,r));
+      const rows=Array.from(dedupMap.values());
+      const dupCount=rowsRaw.length-rows.length;
       const{error}=await supabase.from("pms").upsert(rows,{onConflict:"code"});
       if(error){setImpMsg("Erreur: "+error.message);setGeoProgress("");return;}
 
+      // Defensive: ensure all imported PMs are reactivated (resolved=false), in case the upsert
+      // didn't override the resolved flag for some rows (e.g. RLS, partial column update, race conditions)
+      const importedCodesArr=Array.from(new Set(np.map(p=>p.code)));
+      // Chunk into batches of 200 to avoid URL length limits on .in()
+      for(let off=0;off<importedCodesArr.length;off+=200){
+        const chunk=importedCodesArr.slice(off,off+200);
+        await supabase.from("pms").update({resolved:false,resolved_at:null,resolved_reason:null}).in("code",chunk);
+      }
+
       // Mark PMs absent from new import as resolved
-      const importedCodes=new Set(np.map(p=>p.code));
+      const importedCodes=new Set(importedCodesArr);
       const activePmsBefore=pms.filter(p=>!p.resolved);
       const toResolve=activePmsBefore.filter(p=>!importedCodes.has(p.code));
       let resolvedCount=0;
@@ -527,7 +544,7 @@ export default function App(){
       }
 
       const geocoded=geoResults.filter(p=>p.lat).length;
-      setImpMsg(`${np.length} PM importés · ${geocoded} géocodés${resolvedCount>0?` · ${resolvedCount} PM résolus`:""}`);
+      setImpMsg(`${rows.length} PM importés${dupCount>0?` (${dupCount} doublon${dupCount>1?"s":""} fusionné${dupCount>1?"s":""})`:""} · ${geocoded} géocodés${resolvedCount>0?` · ${resolvedCount} PM résolus`:""}`);
       setGeoProgress("");
       await loadAll();
     };
@@ -1893,22 +1910,26 @@ export default function App(){
     </div></div>)}
     {showVilleStats&&isM&&(()=>{
       const villeData={};
-      activePms.forEach(pm=>{const v=getVille(pm.adresse);if(!v)return;if(!villeData[v])villeData[v]={pm:0,iw:0};villeData[v].pm++;villeData[v].iw+=pm.nbIW;});
+      activePms.forEach(pm=>{const v=getVille(pm.adresse);if(!v)return;if(!villeData[v])villeData[v]={pm:0,iw:0,resolved:0,resolvedIw:0};villeData[v].pm++;villeData[v].iw+=pm.nbIW;});
+      // Also count resolved PMs per city for diagnostic
+      resolvedPms.forEach(pm=>{const v=getVille(pm.adresse);if(!v)return;if(!villeData[v])villeData[v]={pm:0,iw:0,resolved:0,resolvedIw:0};villeData[v].resolved++;villeData[v].resolvedIw+=pm.nbIW;});
       const sorted=Object.entries(villeData).sort((a,b)=>b[1].pm-a[1].pm);
       return(<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}} onClick={()=>setShowVilleStats(false)}>
-        <div style={{background:"#fff",borderRadius:12,padding:20,width:500,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{background:"#fff",borderRadius:12,padding:20,width:560,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
           <h3 style={{fontFamily:F,color:CL.dk,fontSize:16,fontWeight:800,marginBottom:12}}>📊 Classement des villes</h3>
-          <div style={{display:"grid",gridTemplateColumns:"2fr .8fr .8fr",gap:0,fontFamily:F,fontSize:11}}>
+          <div style={{display:"grid",gridTemplateColumns:"1.6fr .6fr .6fr .8fr",gap:0,fontFamily:F,fontSize:11}}>
             <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>VILLE</div>
             <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>PM</div>
             <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}}>IW</div>
+            <div style={{fontWeight:800,color:CL.sb,padding:"6px 8px",textAlign:"center",borderBottom:`2px solid ${CL.dk}`,background:"#f9fafb"}} title="PM marqués comme résolus (cachés du dashboard)">RÉS.</div>
             {sorted.map(([ville,d],i)=><div key={ville} style={{display:"contents"}}>
               <div style={{padding:"5px 8px",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:i<3?700:400,color:i<3?CL.dk:CL.sb,cursor:"pointer"}} onClick={()=>{setFVille(ville);setShowVilleStats(false);}}>{i<3?["🥇","🥈","🥉"][i]+" ":""}{ville}</div>
               <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:700,color:"#2563eb"}}>{d.pm}</div>
               <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:700,color:CL.a}}>{d.iw}</div>
+              <div style={{padding:"5px 8px",textAlign:"center",borderBottom:`1px solid ${CL.bd}`,background:i%2?"#fff":"#f9fafb",fontWeight:d.resolved>0?700:400,color:d.resolved>0?"#059669":CL.sb,fontSize:10}} title={d.resolved>0?`${d.resolved} PM résolus, ${d.resolvedIw} IW`:""}>{d.resolved>0?`${d.resolved} (${d.resolvedIw}iw)`:"—"}</div>
             </div>)}
           </div>
-          <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:10}}>Cliquer sur une ville pour filtrer le dashboard</div>
+          <div style={{fontFamily:F,fontSize:9,color:CL.sb,marginTop:10}}>Cliquer sur une ville pour filtrer · Colonne RÉS. = PM résolus (non comptés dans PM/IW)</div>
           <button onClick={()=>setShowVilleStats(false)} style={{...b2,width:"100%",marginTop:12}}>Fermer</button>
         </div>
       </div>);
